@@ -1,0 +1,1 @@
+"""Motor hardware adapter package."""
