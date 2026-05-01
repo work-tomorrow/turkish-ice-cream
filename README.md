@@ -34,7 +34,7 @@ Optional: hardware targets (e.g. Raspberry Pi) depend on how you deploy `motor_a
 ### 1 Clone the repository
 
 ```bash
-git clone https://github.com/work-tomorrow/turkish-ice-cream.git
+git clone git@github.com:work-tomorrow/turkish-ice-cream.git
 cd turkish-ice-cream
 ```
 
