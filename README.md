@@ -12,7 +12,9 @@ A lightweight **Turkish ice cream project** that combines a **FastAPI** core ser
 
 ## ✨ Features
 
-- ***
+- blablabla
+
+---
 
 ## 📋 Prerequisites
 
