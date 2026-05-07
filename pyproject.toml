@@ -17,7 +17,7 @@ dependencies = [
 packages = [
     { include = "core" },
     { include = "hand_tracking", from = "packages" },
-    { include = "motor_adapter", from = "packages" },
+    { include = "motor_control", from = "packages" },
 ]
 
 [build-system]

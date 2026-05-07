@@ -1,0 +1,76 @@
+"""Default mixed-motor configuration."""
+
+from motor_control.models import MotorConfig, MotorKind
+
+
+DEFAULT_MOTOR_CONFIGS = [
+    MotorConfig(
+        id="stepper_1",
+        kind=MotorKind.STEPPER,
+        min_angle=-180.0,
+        max_angle=180.0,
+        home_angle=0.0,
+        driver_type="mock_stepper",
+        requires_homing=True,
+        steps_per_rev=200,
+        microsteps=16,
+        gear_ratio=1.0,
+        driver_options={
+            "step_pin": None,
+            "dir_pin": None,
+            "enable_pin": None,
+            "limit_pin": None,
+            "home_direction": -1,
+        },
+    ),
+    MotorConfig(
+        id="stepper_2",
+        kind=MotorKind.STEPPER,
+        min_angle=-90.0,
+        max_angle=90.0,
+        home_angle=0.0,
+        driver_type="mock_stepper",
+        requires_homing=True,
+        steps_per_rev=200,
+        microsteps=16,
+        gear_ratio=1.0,
+        driver_options={
+            "step_pin": None,
+            "dir_pin": None,
+            "enable_pin": None,
+            "limit_pin": None,
+            "home_direction": -1,
+        },
+    ),
+    MotorConfig(
+        id="tt_1",
+        kind=MotorKind.TT,
+        min_angle=-90.0,
+        max_angle=90.0,
+        home_angle=0.0,
+        driver_type="mock_tt",
+        requires_feedback=False,
+        position_control_mode="approximate",
+        driver_options={"pwm_pin": None, "dir_pin": None},
+    ),
+    MotorConfig(
+        id="tt_2",
+        kind=MotorKind.TT,
+        min_angle=-90.0,
+        max_angle=90.0,
+        home_angle=0.0,
+        driver_type="mock_tt",
+        requires_feedback=False,
+        position_control_mode="approximate",
+        driver_options={"pwm_pin": None, "dir_pin": None},
+    ),
+    MotorConfig(
+        id="pm30225",
+        kind=MotorKind.PM30225_SERIAL,
+        min_angle=-180.0,
+        max_angle=180.0,
+        home_angle=0.0,
+        driver_type="mock_pm30225",
+        driver_options={"port": None, "baudrate": 115200},
+    ),
+]
