@@ -13,7 +13,7 @@ async def lifespan(app: FastAPI):
     app.state.emergency_stopped = False
     app.state.current_action = ActionName.home
     app.state.tease_count = 0
-    app.state.max_tease = 3
+    app.state.max_tease = 10
     app.state.hand = Hand()
     yield
 

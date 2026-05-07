@@ -92,38 +92,6 @@ async def get_status(request: Request) -> StatusResponse:
     return _status_payload(request)
 
 
-@api_router.get("/actions", response_model=ActionsResponse, tags=["actions"])
-async def get_actions() -> ActionsResponse:
-    """List every robot action that can be triggered manually."""
-    return ActionsResponse(actions=list(ActionName))
-
-
-@api_router.post("/actions", response_model=ActionCommandResponse, tags=["actions"])
-async def run_action(
-    req: ActionRequest,
-    request: Request,
-) -> ActionCommandResponse:
-    """Execute one manual robot action command as a stub state update."""
-    _ensure_not_emergency_stopped(request)
-    try:
-        action_name = ActionName(req.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Unknown action") from exc
-
-    request.app.state.current_action = action_name
-    return ActionCommandResponse(
-        ok=True,
-        action=ActionResult(name=action_name, status="executed"),
-        current_action=action_name,
-    )
-
-
-@api_router.get("/session", response_model=SessionResponse, tags=["session"])
-async def get_session(request: Request) -> SessionResponse:
-    """Return the current single demo session state."""
-    return _session_payload(request)
-
-
 @api_router.post(
     "/session",
     response_model=SessionCreateResponse,
@@ -179,6 +147,38 @@ async def delete_session(request: Request) -> SessionDeleteResponse:
         session=SessionActiveResponse(active=False),
         current_action=request.app.state.current_action,
     )
+
+
+@api_router.get("/actions", response_model=ActionsResponse, tags=["actions"])
+async def get_actions() -> ActionsResponse:
+    """List every robot action that can be triggered manually."""
+    return ActionsResponse(actions=list(ActionName))
+
+
+@api_router.post("/actions", response_model=ActionCommandResponse, tags=["actions"])
+async def run_action(
+    req: ActionRequest,
+    request: Request,
+) -> ActionCommandResponse:
+    """Execute one manual robot action command as a stub state update."""
+    _ensure_not_emergency_stopped(request)
+    try:
+        action_name = ActionName(req.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Unknown action") from exc
+
+    request.app.state.current_action = action_name
+    return ActionCommandResponse(
+        ok=True,
+        action=ActionResult(name=action_name, status="executed"),
+        current_action=action_name,
+    )
+
+
+@api_router.get("/session", response_model=SessionResponse, tags=["session"])
+async def get_session(request: Request) -> SessionResponse:
+    """Return the current single demo session state."""
+    return _session_payload(request)
 
 
 @api_router.post(
