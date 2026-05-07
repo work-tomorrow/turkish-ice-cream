@@ -90,14 +90,12 @@ poetry install                           # creates .venv + installs packages
 
 ---
 
-## 🛠 Common Commands
+## 🛠 Start Core API
 
-| Goal                      | Command                                                                    |
-| ------------------------- | -------------------------------------------------------------------------- |
-| Drop into virtual-env     | `eval "$(poetry env activate)"`                                            |
-| Run core API (reload)     | `poetry run python -m core`                                                |
-| Run core API (uvicorn)    | `poetry run uvicorn core.app.main:app --reload --host 0.0.0.0 --port 8000` |
-| Open interactive API docs | Visit http://127.0.0.1:8000/docs after starting the server                 |
+```sh
+eval "$(poetry env activate)"
+poetry run python -m core
+```
 
 ### Other Commands
 
