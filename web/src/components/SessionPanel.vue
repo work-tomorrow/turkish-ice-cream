@@ -23,7 +23,12 @@
     </el-form>
 
     <div class="button-row">
-      <el-button type="primary" :icon="VideoPlay" :loading="busy === 'start'" @click="$emit('start')">
+      <el-button
+        type="primary"
+        :icon="VideoPlay"
+        :loading="busy === 'start'"
+        @click="$emit('start')"
+      >
         Start
       </el-button>
       <el-button :icon="SwitchButton" :loading="busy === 'pause'" @click="$emit('pause')">
