@@ -111,7 +111,7 @@ def _motor_payload(request: Request) -> list[MotorStatus]:
     return [
         MotorStatus(
             id=config.id,
-            current_angle=state.motors[config.id].current_angle,
+            current_angle=state["motors"][config.id]["commanded_angle"],
             min_angle=config.min_angle,
             max_angle=config.max_angle,
             step_degrees=DEFAULT_STEP_DEGREES,
@@ -226,7 +226,7 @@ async def jog_motor(
         delta_degrees *= -1
 
     manager_state = request.app.state.motor_manager.get_state()
-    next_angle = manager_state.motors[motor_id].current_angle + delta_degrees
+    next_angle = manager_state["motors"][motor_id]["commanded_angle"] + delta_degrees
     if next_angle < config.min_angle or next_angle > config.max_angle:
         raise HTTPException(
             status_code=400,
@@ -237,8 +237,8 @@ async def jog_motor(
         )
 
     targets = {
-        motor_id: motor_state.target_angle
-        for motor_id, motor_state in manager_state.motors.items()
+        mid: motor_state["commanded_angle"]
+        for mid, motor_state in manager_state["motors"].items()
     }
     targets[motor_id] = next_angle
     try:
