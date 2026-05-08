@@ -7,6 +7,7 @@ from core.app.config import settings
 from core.app.models import Hand, RobotState
 from core.app.router import api_router
 from motor_control import MotorManager
+from motor_control.config import build_m1_m4_hardware_motors
 
 
 @asynccontextmanager
@@ -17,7 +18,18 @@ async def lifespan(app: FastAPI):
     app.state.tease_count = 0
     app.state.max_tease = 10
     app.state.hand = Hand()
-    app.state.motor_manager = MotorManager()
+    app.state.motor_manager = MotorManager(
+        motors=build_m1_m4_hardware_motors(
+            stepper_options={
+                "m1": {"step_pin": 17, "dir_pin": 27, "driver": "hardware"},
+                "m2": {"step_pin": 23, "dir_pin": 24, "driver": "hardware"},
+            },
+            servo_options={
+                "m3": {"signal_pin": 18},
+                "m4": {"signal_pin": 19},
+            },
+        )
+    )
     app.state.motor_manager_ready = False
     try:
         yield

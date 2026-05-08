@@ -54,6 +54,33 @@ class MotorManager:
     def motor_ids(self) -> tuple[str, ...]:
         return tuple(self._motors.keys())
 
+    def start(self) -> None:
+        # Start any background threads if needed (steppers have their own)
+        pass
+
+    def stop(self) -> None:
+        # Stop any background threads
+        pass
+
+    def home_all(self) -> None:
+        with self._lock:
+            for motor in self._motors.values():
+                if isinstance(motor, StepperMotor):
+                    motor.commanded_angle = 0.0
+                    motor.current_steps = 0
+                    motor.target_steps = 0
+
+    def set_target(self, targets: dict[str, float], duration_ms: int) -> None:
+        self.set_target_angles(targets)
+
+    def set_current_angle_zero(self) -> None:
+        with self._lock:
+            for motor in self._motors.values():
+                motor.commanded_angle = 0.0
+                if isinstance(motor, StepperMotor):
+                    motor.current_steps = 0
+                    motor.target_steps = 0
+
     def set_target_angles(self, targets: dict[str, float]) -> None:
         with self._lock:
             if self._emergency_stopped:

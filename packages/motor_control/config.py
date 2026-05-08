@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from motor_control.motors import ServoMotor, ServoPwmConfig, StepperMotor
+from motor_control.models import MotorConfig, MotorKind
 
 STEPPER_ANGLE_RANGE = (-180.0, 180.0)
 SERVO_ANGLE_RANGE = (0.0, 180.0)
@@ -97,6 +97,10 @@ def build_m1_m4_hardware_motors(
         steps_per_rev = int(opts.get("steps_per_rev", STEPPER_STEPS_PER_REV))
         microsteps = int(opts.get("microsteps", STEPPER_MICROSTEPS))
         gear_ratio = float(opts.get("gear_ratio", 1.0))
+        driver = opts.get("driver", "hardware")
+        step_pin = opts.get("step_pin")
+        dir_pin = opts.get("dir_pin")
+        enable_pin = opts.get("enable_pin")
         return StepperMotor(
             motor_id=motor_id,
             min_angle=STEPPER_ANGLE_RANGE[0],
@@ -105,12 +109,16 @@ def build_m1_m4_hardware_motors(
             steps_per_rev=steps_per_rev,
             microsteps=microsteps,
             gear_ratio=gear_ratio,
-            driver="hardware",
+            driver=driver,
+            step_pin=step_pin,
+            dir_pin=dir_pin,
+            enable_pin=enable_pin,
         )
 
     def _servo(motor_id: str) -> ServoMotor:
         opts = servo_options.get(motor_id, {})
         max_vel = float(opts.get("max_velocity_deg_s", DEFAULT_MAX_VELOCITY_DEG_S))
+        driver = opts.get("driver", "hardware")
         return ServoMotor(
             motor_id=motor_id,
             min_angle=float(opts.get("min_angle", SERVO_ANGLE_RANGE[0])),
@@ -122,7 +130,96 @@ def build_m1_m4_hardware_motors(
                 min_pulse_us=float(opts.get("min_pulse_us", SERVO_MIN_PULSE_US)),
                 max_pulse_us=float(opts.get("max_pulse_us", SERVO_MAX_PULSE_US)),
             ),
-            driver="hardware",
+            driver=driver,
         )
 
     return {"m1": _stepper("m1"), "m2": _stepper("m2"), "m3": _servo("m3"), "m4": _servo("m4")}
+
+
+def build_default_motor_configs() -> list[MotorConfig]:
+    return [
+        MotorConfig(
+            id="m1",
+            kind=MotorKind.STEPPER,
+            min_angle=STEPPER_ANGLE_RANGE[0],
+            max_angle=STEPPER_ANGLE_RANGE[1],
+            driver_type="mock_stepper",
+        ),
+        MotorConfig(
+            id="m2",
+            kind=MotorKind.STEPPER,
+            min_angle=STEPPER_ANGLE_RANGE[0],
+            max_angle=STEPPER_ANGLE_RANGE[1],
+            driver_type="mock_stepper",
+        ),
+        MotorConfig(
+            id="m3",
+            kind=MotorKind.SERVO,
+            min_angle=SERVO_ANGLE_RANGE[0],
+            max_angle=SERVO_ANGLE_RANGE[1],
+            driver_type="mock_servo",
+        ),
+        MotorConfig(
+            id="m4",
+            kind=MotorKind.SERVO,
+            min_angle=SERVO_ANGLE_RANGE[0],
+            max_angle=SERVO_ANGLE_RANGE[1],
+            driver_type="mock_servo",
+        ),
+    ]
+
+
+def build_m1_m4_hardware_configs(
+    *,
+    stepper_options: dict[str, dict[str, Any]] | None = None,
+    servo_options: dict[str, dict[str, Any]] | None = None,
+) -> list[MotorConfig]:
+    stepper_options = stepper_options or {}
+    servo_options = servo_options or {}
+
+    def _stepper_config(motor_id: str) -> MotorConfig:
+        opts = stepper_options.get(motor_id, {})
+        driver_type = opts.get("driver", "nema17_step_dir")
+        driver_options = {
+            "max_velocity_deg_s": float(opts.get("max_velocity_deg_s", DEFAULT_MAX_VELOCITY_DEG_S)),
+            "steps_per_rev": int(opts.get("steps_per_rev", STEPPER_STEPS_PER_REV)),
+            "microsteps": int(opts.get("microsteps", STEPPER_MICROSTEPS)),
+            "gear_ratio": float(opts.get("gear_ratio", 1.0)),
+            "step_pin": opts.get("step_pin"),
+            "dir_pin": opts.get("dir_pin"),
+            "enable_pin": opts.get("enable_pin"),
+        }
+        return MotorConfig(
+            id=motor_id,
+            kind=MotorKind.STEPPER,
+            min_angle=STEPPER_ANGLE_RANGE[0],
+            max_angle=STEPPER_ANGLE_RANGE[1],
+            driver_type=driver_type,
+            driver_options=driver_options,
+        )
+
+    def _servo_config(motor_id: str) -> MotorConfig:
+        opts = servo_options.get(motor_id, {})
+        driver_type = opts.get("driver", "mg995_servo")
+        driver_options = {
+            "max_velocity_deg_s": float(opts.get("max_velocity_deg_s", DEFAULT_MAX_VELOCITY_DEG_S)),
+            "min_angle": float(opts.get("min_angle", SERVO_ANGLE_RANGE[0])),
+            "max_angle": float(opts.get("max_angle", SERVO_ANGLE_RANGE[1])),
+            "frequency_hz": float(opts.get("frequency_hz", SERVO_FREQUENCY_HZ)),
+            "min_pulse_us": float(opts.get("min_pulse_us", SERVO_MIN_PULSE_US)),
+            "max_pulse_us": float(opts.get("max_pulse_us", SERVO_MAX_PULSE_US)),
+            "signal_pin": opts.get("signal_pin"),
+        }
+        return MotorConfig(
+            id=motor_id,
+            kind=MotorKind.SERVO,
+            min_angle=float(opts.get("min_angle", SERVO_ANGLE_RANGE[0])),
+            max_angle=float(opts.get("max_angle", SERVO_ANGLE_RANGE[1])),
+            driver_type=driver_type,
+            driver_options=driver_options,
+        )
+
+    return [_stepper_config("m1"), _stepper_config("m2"), _servo_config("m3"), _servo_config("m4")]
+
+
+DEFAULT_MOTOR_CONFIGS = build_default_motor_configs()

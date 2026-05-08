@@ -113,6 +113,9 @@ class StepperMotor:
         gear_ratio: float = 1.0,
         driver: str = "mock",
         step_fn: Callable[[int], None] | None = None,
+        step_pin: int | None = None,
+        dir_pin: int | None = None,
+        enable_pin: int | None = None,
     ) -> None:
         self.id = motor_id
         self.min_angle = float(min_angle)
@@ -131,6 +134,9 @@ class StepperMotor:
         self._stop_event = Event()
         self._pause_event = Event()  # e-stop gate
         self._step_fn = step_fn or self._default_step_fn
+        self.step_pin = step_pin
+        self.dir_pin = dir_pin
+        self.enable_pin = enable_pin
 
         self._thread = Thread(
             target=self._run_pulse_loop,
@@ -214,5 +220,26 @@ class StepperMotor:
         if self._driver == "mock":
             return
 
-        # Hardware driver intentionally omitted here; extend when needed.
-        raise NotImplementedError("Hardware step pulse not implemented yet")
+        # Hardware driver
+        if self.step_pin is None or self.dir_pin is None:
+            raise ValueError(f"Stepper {self.id} needs step_pin and dir_pin for hardware driver")
+
+        try:
+            import RPi.GPIO as GPIO  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError(f"Stepper {self.id} requires RPi.GPIO on Raspberry Pi") from exc
+
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setup(self.step_pin, GPIO.OUT)
+        GPIO.setup(self.dir_pin, GPIO.OUT)
+        if self.enable_pin is not None:
+            GPIO.setup(self.enable_pin, GPIO.OUT)
+            GPIO.output(self.enable_pin, GPIO.LOW)  # Enable (active low)
+
+        # Set direction
+        GPIO.output(self.dir_pin, GPIO.HIGH if direction > 0 else GPIO.LOW)
+
+        # Pulse step
+        GPIO.output(self.step_pin, GPIO.HIGH)
+        sleep(0.000001)  # 1us pulse
+        GPIO.output(self.step_pin, GPIO.LOW)
