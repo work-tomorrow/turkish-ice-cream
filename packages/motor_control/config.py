@@ -9,6 +9,7 @@ import os
 from typing import Any
 
 from motor_control.models import MotorConfig, MotorKind
+from motor_control.motors import ServoMotor, ServoPwmConfig, StepperMotor
 
 STEPPER_ANGLE_RANGE = (-180.0, 180.0)
 SERVO_ANGLE_RANGE = (0.0, 180.0)
