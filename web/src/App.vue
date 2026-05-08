@@ -21,10 +21,8 @@
 
       <section class="control-grid">
         <SessionPanel
-          v-model:max-tease="maxTease"
           :session="session"
           :busy="busy"
-          @edit-max-tease="editingMaxTease = $event"
           @start="startSession"
           @pause="setSessionActive(false)"
           @reset="resetSession"
@@ -89,13 +87,9 @@ const status = reactive({
 const session = reactive({
   active: false,
   robot_state: 'idle',
-  tease_count: 0,
-  max_tease: 3,
 })
 
 const motors = ref([])
-const maxTease = ref(3)
-const editingMaxTease = ref(false)
 const loading = ref(false)
 const busy = ref('')
 const apiOnline = ref(false)
@@ -161,9 +155,6 @@ const refreshStatus = async () => {
 const refreshSession = async () => {
   const res = await axios.get('/session')
   Object.assign(session, res.data)
-  if (!editingMaxTease.value) {
-    maxTease.value = res.data.max_tease
-  }
 }
 
 const refreshMotors = async () => {
@@ -197,7 +188,7 @@ const withBusy = async (key, fn) => {
 
 const startSession = () =>
   withBusy('start', async () => {
-    await axios.post('/session', { max_tease: maxTease.value })
+    await axios.post('/session', {})
     ElMessage.success('Session started')
   })
 
@@ -227,7 +218,9 @@ const jogMotor = ({ motorId, direction }) =>
 const zeroMotor = (motorId) =>
   withBusy(motorId ? `${motorId}-zero` : 'zero-all', async () => {
     await axios.post(motorId ? `/motors/${motorId}/zero` : '/motors/zero')
-    ElMessage.success(motorId ? `${motorId} set to 0 deg` : 'All motor angles set to 0 deg')
+    ElMessage.success(
+      motorId ? `${motorId} zero calibration saved` : 'All motor zero calibrations saved',
+    )
   })
 
 const setEmergencyStop = () =>

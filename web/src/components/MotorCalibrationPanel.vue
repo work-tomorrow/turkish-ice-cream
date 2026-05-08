@@ -30,7 +30,6 @@
             -{{ motor.step_degrees }} deg
           </el-button>
           <el-button
-            type="primary"
             :disabled="emergencyStopped"
             :loading="busy === `${motor.id}-positive`"
             @click="$emit('jog-motor', { motorId: motor.id, direction: 'positive' })"
@@ -38,6 +37,7 @@
             +{{ motor.step_degrees }} deg
           </el-button>
           <el-button
+            type="primary"
             :disabled="emergencyStopped"
             :loading="busy === `${motor.id}-zero`"
             @click="$emit('zero-motor', motor.id)"

@@ -107,6 +107,33 @@ class CoreApiMotorTest(unittest.TestCase):
                 {"m1", "m2", "m3", "m4"},
             )
 
+    def test_zero_motor_route_redefines_absolute_zero_for_future_jogs(self) -> None:
+        with _request_context() as request:
+            asyncio.run(
+                router.jog_motor(
+                    "m3",
+                    MotorJogRequest(
+                        direction=MotorDirection.positive,
+                        step_degrees=3,
+                    ),
+                    request,
+                )
+            )
+            asyncio.run(router.zero_motor("m3", request))
+            response = asyncio.run(
+                router.jog_motor(
+                    "m3",
+                    MotorJogRequest(
+                        direction=MotorDirection.positive,
+                        step_degrees=3,
+                    ),
+                    request,
+                )
+            )
+
+            payload = response.model_dump()
+            self.assertEqual(payload["action"]["current_angle"], 3.0)
+
 
 class _request_context:
     def __enter__(self):

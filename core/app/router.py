@@ -265,7 +265,7 @@ async def jog_motor(
 
 @api_router.post("/motors/zero", response_model=MotorZeroResponse, tags=["motors"])
 async def zero_all_motors(request: Request) -> MotorZeroResponse:
-    """Treat the current motor position as zero degrees for calibration."""
+    """Save the current motor positions as the absolute zero calibration."""
     _ensure_not_emergency_stopped(request)
     _ensure_motor_manager_ready(request)
 
@@ -292,7 +292,7 @@ async def zero_motor(
     motor_id: str,
     request: Request,
 ) -> MotorZeroResponse:
-    """Treat one motor's current position as zero degrees for calibration."""
+    """Save one motor's current position as the absolute zero calibration."""
     _ensure_not_emergency_stopped(request)
     _ensure_motor_id(motor_id)
     _ensure_motor_manager_ready(request)

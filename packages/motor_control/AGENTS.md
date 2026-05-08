@@ -26,6 +26,42 @@ The current robot has 4 motors:
 Upper layers should not need to know which motor is stepper or servo
 controlled.
 
+## Control tick contract (robot arm)
+
+- **Single control loop**: Only `MotorManager._run_worker` runs the periodic tick
+  (after `start()`). One tick should stay short (order of `1000 / control_hz` ms,
+  e.g. ~20 ms at 50 Hz).
+- **Coordinated motion**: Each tick applies the **same** `command_id` and the same
+  interpolation clock to every motor. All joints receive their setpoint for that
+  instant; no joint should block the tick while others wait (`sleep` loops,
+  walking thousands of steps, blocking I/O).
+- **`set_target` semantics**: Stores the **latest** command only (overwrite, no
+  queue). Returns immediately; it does not move hardware itself.
+- **Execution vs control**: `Motor.update()` must be a **non-blocking** tick
+  handler. Long step pulses belong in an execution layer (shared scheduler,
+  pigpio/DMA, external MCU, etc.), not inside the manager tick.
+
+## MotorState.current_angle (Option A — trajectory setpoint)
+
+- **`current_angle` / `target_angle`**: Trajectory **setpoints** from the same
+  interpolation as `duration_ms` (what the motion planner intends at this tick).
+- **`hw_angle` (optional)**: When present, best-effort **actual** angle from
+  hardware step/pulse state (e.g. stepper steps executed). Real hardware may lag
+  the trajectory; do not assume `current_angle == hw_angle` every tick.
+- Option B (actual == measured steps only) is **not** used; tests and callers
+  assume trajectory semantics unless they opt into `hw_angle`.
+
+## Stepper execution backends
+
+- **`rpi_gpio_shared`** (default for real STEP/DIR on Pi): Per-tick chunks are
+  handled by a **single shared** background scheduler thread that walks pulses
+  (round-robin across motors when multiple axes have work). This keeps one time
+  base for coordinated motion without per-motor control threads.
+- **`pigpio` / external MCU**: Preferred for production timing; document when
+  wired (not required for mock-only tests).
+- **`driver_options`**: `step_execution_backend`, `max_steps_per_tick` — see
+  `config.py` / `motors.py`.
+
 ## Hard Rules
 
 - Keep `MotorManager` as the only main public entry point.
@@ -42,14 +78,14 @@ controlled.
 - `MotorManager.start()` owns the background control-loop thread.
 - The control loop must repeatedly read the latest target. Do not change it
   back to "execute one full command then check for the next command".
-- Do not call controller or driver hardware methods while holding
+- Do not call motor hardware methods while holding
   `MotorManager._lock`.
 - `MotorManager._command_condition` protects only latest-command state and
   worker wakeups.
-- Controller state must be protected inside each controller, not by manager.
-- Keep hardware-specific code in `drivers/`, not in `manager.py`.
-- Keep motor-type angle semantics in `controllers/`, not in upper layers.
-- Do not pretend incomplete hardware drivers are production-ready. Leave
+- Per-motor state must be protected inside each motor instance, not by manager.
+- Keep hardware-specific code inside the motor implementation module, not in
+  `manager.py`.
+- Do not pretend incomplete hardware integrations are production-ready. Leave
   `NotImplementedError` or explicit TODOs until real hardware behavior exists.
 - Keep mock tests runnable on a normal development machine without Raspberry Pi
   hardware.
@@ -62,12 +98,7 @@ Before changing behavior, inspect these files:
 - `config.py`: default 4-motor configuration, ids, and tunable hardware
   parameters.
 - `models.py`: shared data structures and motor kinds.
-- `controllers/base.py`: controller protocol and shared state handling.
-- `controllers/stepper.py`: stepper angle-to-step behavior and homing state.
-- `controllers/servo.py`: MG995 servo angle behavior.
-- `drivers/mock.py`: mock drivers for local tests.
-- `drivers/stepper.py`: TODO STEP/DIR Raspberry Pi driver.
-- `drivers/servo.py`: Raspberry Pi PWM driver for MG995 servos.
+- `motors.py`: per-motor state, hardware access, and motor-type behavior.
 - `tests/test_motor_control.py`: current behavior contract.
 
 ## Current Architecture
@@ -77,9 +108,7 @@ Keep this dependency direction:
 ```text
 upper layer
   -> MotorManager
-      -> MotorController
-          -> MotorDriver
-          -> optional FeedbackReader
+      -> StepperMotor / ServoMotor / PM30225Motor
 ```
 
 Responsibilities:
@@ -87,30 +116,22 @@ Responsibilities:
 - `MotorManager`: validate complete target payloads, enforce angle ranges,
   expose `start()`, `stop()`, `home_all()`, `set_target()`, `get_state()`, and
   `emergency_stop()`. It also owns the background control-loop thread.
-- `controllers/`: translate angle-level commands into motor-type-specific
-  behavior. Controllers should support small per-tick updates.
-- `drivers/`: touch GPIO, PWM, Serial/UART, motor HATs, or other hardware APIs.
+- `motors.py`: keep one class per supported motor family. Each motor class owns
+  both its runtime state and its hardware/mock behavior.
 - `config.py`: hardware identity, limits, pins/options, and driver selection.
-
-Controller vs driver rule of thumb:
-
-- A controller answers: "Given a target angle and duration, what does this motor
-  type need to do?"
-- A driver answers: "How do I send that command to this piece of hardware?"
-- If the code mentions angle limits, homing state, approximate control, or
-  angle-to-step conversion, it belongs in `controllers/`.
-- If the code mentions GPIO pins, PWM duty cycle, step pulses, serial ports, or
-  vendor libraries, it belongs in `drivers/`.
 
 ## Existing Implementation Notes
 
 - `pyproject.toml` should include `motor_control` from `packages`.
-- The default config uses mock drivers so tests can run without hardware.
+- The default config uses mock motor modes so tests can run without hardware.
 - `set_target()` is non-blocking at the API layer. It stores the latest command;
   the manager control loop applies it after `start()` is called.
 - The control loop currently runs at `control_hz=50.0` by default.
+- Optional observability: `TURKISH_ICE_CREAM_MOTOR_TICK_WARN_MS` — log a warning when
+  a tick exceeds this many milliseconds; `MotorManager(..., tick_timing_hook=...)`
+  receives each tick duration in ms (for tests or profiling).
 - Stepper motors currently require `home_all()` before `set_target()`.
-- Default configs use mock drivers. Hardware configs for `m1` through `m4`
+- Default configs use mock motor modes. Hardware configs for `m1` through `m4`
   should be built with `build_m1_m4_hardware_configs()` after tuning the pin,
   angle, pulse-width, and stepper constants in `config.py`.
 - Set `TURKISH_ICE_CREAM_MOTOR_PROFILE=hardware` in deployment to make
@@ -119,22 +140,14 @@ Controller vs driver rule of thumb:
 
 ## How To Add Hardware Support
 
-Stepper work:
-
 - Implement GPIO setup, enable, disable, direction, step pulse, limit switch
-  read, stop, and cleanup in `drivers/stepper.py`.
-- Keep Raspberry Pi library imports inside `drivers/stepper.py`.
-- Improve `StepperController` in `controllers/stepper.py` after the driver
-  exists.
+  read, stop, and cleanup inside `StepperMotor`.
+- Keep Raspberry Pi library imports inside `motors.py`, never in `manager.py`.
 - Replace the current mock-friendly immediate stepping with timed motion.
 - Implement real homing: slow seek toward limit switch, debounce, optional
   backoff, then assign `home_angle`.
-
-Servo work:
-
-- Tune `SERVO_DEFAULTS` and `HARDWARE_SERVO_OPTIONS` in `config.py` for MG995
-  pulse width, PWM frequency, GPIO mode, and signal pins.
-- Keep MG995 duty-cycle conversion in `drivers/servo.py`.
+- Tune `HARDWARE_SERVO_OPTIONS` in `config.py` for MG995 pulse width, PWM
+  frequency, GPIO mode, and signal pins.
 
 ## Testing Requirements
 
@@ -153,7 +166,7 @@ Add or update tests when changing:
 - concurrent `set_target()` / `get_state()` behavior while the worker is running
 - homing readiness behavior
 - angle-to-step conversion
-- MG995 duty-cycle conversion
+- servo duty-cycle conversion
 - emergency stop behavior
 
 Hardware tests should be opt-in and clearly separated from normal unit tests.
@@ -167,8 +180,9 @@ Do not make the default test command require Raspberry Pi hardware.
   change.
 - If adding a new motor kind, add it to `MotorKind`, config construction,
   controller construction, and tests.
-- Keep the current split by responsibility and motor type. Add new files only
-  when a new hardware family or real complexity appears.
+- Keep the current flat split: `manager.py`, `config.py`, `models.py`, and
+  `motors.py`. Add new files only when a new hardware family or real
+  complexity appears.
 - Keep comments short and useful. Use TODO comments only where a real hardware
   decision or implementation is still missing.
 - Remove generated `__pycache__` directories before finishing.
@@ -179,9 +193,8 @@ Do not make the default test command require Raspberry Pi hardware.
 - Do not hold manager lifecycle locks while calling driver methods.
 - Do not silently accept missing target motors.
 - Do not queue target commands.
-- Do not move controller execution back into `set_target()`.
-- Do not make controller updates long-running/blocking. They should be short
+- Do not move motor execution back into `set_target()`.
+- Do not make motor updates long-running/blocking. They should be short
   per-tick updates so high-frequency retargeting remains responsive.
-- Do not mix mock behavior into real hardware drivers.
 - Do not make `home_all()` optional for motors configured with
   `requires_homing=True`.

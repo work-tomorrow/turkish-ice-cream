@@ -9,19 +9,6 @@
       </div>
     </template>
 
-    <el-form label-position="top" class="session-form">
-      <el-form-item label="Max Tease">
-        <el-input-number
-          :model-value="maxTease"
-          :min="1"
-          :max="20"
-          @update:model-value="$emit('update:maxTease', $event)"
-          @focus="$emit('edit-max-tease', true)"
-          @blur="$emit('edit-max-tease', false)"
-        />
-      </el-form-item>
-    </el-form>
-
     <div class="button-row">
       <el-button
         type="primary"
@@ -52,17 +39,13 @@ defineProps({
     type: Object,
     required: true,
   },
-  maxTease: {
-    type: Number,
-    required: true,
-  },
   busy: {
     type: String,
     required: true,
   },
 })
 
-defineEmits(['update:maxTease', 'edit-max-tease', 'start', 'pause', 'reset', 'stop'])
+defineEmits(['start', 'pause', 'reset', 'stop'])
 </script>
 
 <style scoped>
@@ -77,10 +60,6 @@ defineEmits(['update:maxTease', 'edit-max-tease', 'start', 'pause', 'reset', 'st
   justify-content: space-between;
   gap: 12px;
   font-weight: 700;
-}
-
-.session-form {
-  max-width: 180px;
 }
 
 .button-row {

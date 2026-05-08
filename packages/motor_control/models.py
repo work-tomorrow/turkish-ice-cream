@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
 
 
 class MotorKind(str, Enum):
@@ -12,11 +11,7 @@ class MotorKind(str, Enum):
 
     STEPPER = "stepper"
     SERVO = "servo"
-    TT = "tt"
     PM30225_SERIAL = "pm30225_serial"
-
-
-PositionControlMode = Literal["closed_loop", "approximate"]
 
 
 @dataclass(frozen=True)
@@ -28,12 +23,10 @@ class MotorConfig:
     min_angle: float
     max_angle: float
     home_angle: float = 0.0
+    zero_offset: float = 0.0
     driver_type: str = "mock"
     driver_options: dict[str, object] = field(default_factory=dict)
-    feedback_options: dict[str, object] = field(default_factory=dict)
     requires_homing: bool = False
-    requires_feedback: bool = False
-    position_control_mode: PositionControlMode = "closed_loop"
     steps_per_rev: int | None = None
     microsteps: int = 1
     gear_ratio: float = 1.0
@@ -45,12 +38,14 @@ class MotorState:
 
     id: str
     kind: MotorKind
+    # Trajectory setpoints (same interpolation clock as MotorManager ticks).
     current_angle: float
     target_angle: float
+    # Optional: hardware-estimated angle (e.g. step count); None if unknown.
+    hw_angle: float | None = None
     moving: bool = False
     homed: bool = False
     ready: bool = False
-    approximate: bool = False
     last_command: str | None = None
     last_error: str | None = None
 

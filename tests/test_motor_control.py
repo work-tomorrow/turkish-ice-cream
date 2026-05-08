@@ -9,8 +9,8 @@ sys.path.insert(0, str(ROOT / "packages"))
 
 from motor_control import MotorManager
 from motor_control.config import build_default_motor_configs, build_m1_m4_hardware_configs
-from motor_control.drivers import MG995ServoDriver
-from motor_control.models import MotorKind
+from motor_control.motors import ServoMotor
+from motor_control.models import MotorConfig, MotorKind
 
 
 class MotorManagerTest(unittest.TestCase):
@@ -199,6 +199,21 @@ class MotorManagerTest(unittest.TestCase):
         self.assertEqual(state.motors["m3"].target_angle, 0.0)
         self.assertEqual(state.motors["m4"].current_angle, 135.0)
 
+    def test_set_current_angle_zero_redefines_future_absolute_angles(self) -> None:
+        self.manager.home_all()
+        self.manager.start()
+        self.manager.set_target(self.targets, duration_ms=100)
+        self.wait_until(lambda: self.manager.get_state().motors["m3"].current_angle == 45.0)
+
+        self.manager.set_current_angle_zero("m3")
+        next_targets = {"m1": 10.0, "m2": -10.0, "m3": 3.0, "m4": 135.0}
+        self.manager.set_target(next_targets, duration_ms=100)
+        self.wait_until(lambda: self.manager.get_state().motors["m3"].current_angle == 3.0)
+
+        state = self.manager.get_state()
+        self.assertEqual(state.motors["m3"].current_angle, 3.0)
+        self.assertEqual(state.motors["m3"].target_angle, 3.0)
+
     def test_set_current_angle_zero_updates_all_motor_states(self) -> None:
         self.manager.home_all()
         self.manager.start()
@@ -215,15 +230,15 @@ class MotorManagerTest(unittest.TestCase):
             all(motor.target_angle == 0.0 for motor in state.motors.values())
         )
 
-    def test_set_current_angle_zero_resets_stepper_current_steps(self) -> None:
+    def test_set_current_angle_zero_resets_stepper_steps(self) -> None:
         self.manager.home_all()
         self.manager.start()
         self.manager.set_target(self.targets, duration_ms=100)
         self.wait_until(lambda: self.manager.get_state().motors["m1"].current_angle == 10.0)
 
+        stepper = self.manager._motors["m1"]
         self.manager.set_current_angle_zero("m1")
 
-        stepper = self.manager._controllers["m1"]
         self.assertEqual(self.manager.get_state().motors["m1"].current_angle, 0.0)
         self.assertEqual(stepper.current_steps, 0)
 
@@ -231,12 +246,42 @@ class MotorManagerTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.manager.set_current_angle_zero("unknown")
 
-    def test_mg995_servo_driver_converts_angle_to_duty_cycle(self) -> None:
-        driver = MG995ServoDriver(signal_pin=18)
+    def test_servo_motor_converts_angle_to_duty_cycle(self) -> None:
+        servo = ServoMotor(
+            MotorConfig(
+                id="m3",
+                kind=MotorKind.SERVO,
+                min_angle=0.0,
+                max_angle=180.0,
+                driver_type="mg995_servo",
+                driver_options={"signal_pin": 18},
+            )
+        )
 
-        self.assertAlmostEqual(driver._angle_to_duty_cycle(0.0), 2.5)
-        self.assertAlmostEqual(driver._angle_to_duty_cycle(90.0), 7.5)
-        self.assertAlmostEqual(driver._angle_to_duty_cycle(180.0), 12.5)
+        self.assertAlmostEqual(servo._angle_to_duty_cycle(0.0), 2.5)
+        self.assertAlmostEqual(servo._angle_to_duty_cycle(90.0), 7.5)
+        self.assertAlmostEqual(servo._angle_to_duty_cycle(180.0), 12.5)
+
+    def test_tick_timing_hook_records_tick_duration(self) -> None:
+        tick_ms: list[float] = []
+        manager = MotorManager(tick_timing_hook=lambda ms: tick_ms.append(ms))
+        try:
+            manager.home_all()
+            manager.start()
+            manager.set_target(self.targets, duration_ms=50)
+            self.wait_until(lambda: len(tick_ms) >= 1)
+            self.assertTrue(all(ms >= 0.0 for ms in tick_ms))
+        finally:
+            manager.stop()
+
+    def test_mock_stepper_leaves_hw_angle_unset(self) -> None:
+        self.manager.home_all()
+        self.manager.start()
+        self.manager.set_target(self.targets, duration_ms=50)
+        self.wait_until(lambda: self.manager.get_state().motors["m1"].current_angle == 10.0)
+
+        state = self.manager.get_state()
+        self.assertIsNone(state.motors["m1"].hw_angle)
 
 
 if __name__ == "__main__":
