@@ -152,7 +152,7 @@ class MotorManager:
         self.clear_emergency_stop()
 
     def cleanup(self) -> None:
-        # Best-effort shutdown for steppers.
+        # Best-effort shutdown for hardware resources.
         for motor in self._motors.values():
-            if isinstance(motor, StepperMotor):
+            if isinstance(motor, StepperMotor | ServoMotor):
                 motor.shutdown()

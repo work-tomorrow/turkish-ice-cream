@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from threading import Event, Lock, Thread
 from time import sleep
-from typing import Callable
+from typing import Any, Callable
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -43,6 +43,8 @@ class ServoMotor:
 
         # Mock-visible output for tests / local dev.
         self.last_pwm_duty_cycle: float | None = None
+        self._gpio: Any | None = None
+        self._pwm: Any | None = None
 
     @property
     def estimated_angle(self) -> None:
@@ -59,18 +61,31 @@ class ServoMotor:
     def stop_now(self) -> None:
         with self._lock:
             self._stopped = True
-            # For now, just stop output (mock: record 0.0).
             self.last_pwm_duty_cycle = 0.0
+            self._stop_pwm_locked()
 
     def clear_stop(self) -> None:
         with self._lock:
             self._stopped = False
+
+    def shutdown(self) -> None:
+        with self._lock:
+            self._stopped = True
+            self._stop_pwm_locked()
 
     def _apply_pwm_for_angle(self, angle: float) -> None:
         duty = self._angle_to_duty_cycle(angle)
         if self._driver == "mock":
             self.last_pwm_duty_cycle = duty
             return
+
+        pwm = self._ensure_pwm()
+        pwm.ChangeDutyCycle(duty)
+        self.last_pwm_duty_cycle = duty
+
+    def _ensure_pwm(self) -> Any:
+        if self._pwm is not None:
+            return self._pwm
 
         # Hardware integration intentionally minimal: keep GPIO imports local.
         try:
@@ -83,10 +98,19 @@ class ServoMotor:
 
         GPIO.setmode(GPIO.BCM)
         GPIO.setup(self._pwm_cfg.signal_pin, GPIO.OUT)
-        pwm = GPIO.PWM(self._pwm_cfg.signal_pin, self._pwm_cfg.frequency_hz)
-        pwm.start(0.0)
-        pwm.ChangeDutyCycle(duty)
-        self.last_pwm_duty_cycle = duty
+        self._gpio = GPIO
+        self._pwm = GPIO.PWM(self._pwm_cfg.signal_pin, self._pwm_cfg.frequency_hz)
+        self._pwm.start(0.0)
+        return self._pwm
+
+    def _stop_pwm_locked(self) -> None:
+        if self._pwm is None:
+            return
+        try:
+            self._pwm.ChangeDutyCycle(0.0)
+            self._pwm.stop()
+        finally:
+            self._pwm = None
 
     def _angle_to_duty_cycle(self, angle: float) -> float:
         span = self.max_angle - self.min_angle
