@@ -344,6 +344,7 @@ async def set_emergency_stop(request: Request) -> EmergencyStopSetResponse:
 async def clear_emergency_stop(request: Request) -> EmergencyStopClearResponse:
     """Clear emergency stop and return the robot action state to home."""
     request.app.state.emergency_stopped = False
+    request.app.state.motor_manager.clear_emergency_stop()
     request.app.state.robot_state = RobotState.idle
     return EmergencyStopClearResponse(
         ok=True,
