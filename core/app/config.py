@@ -13,6 +13,15 @@ class Settings(BaseModel):
     description: str = "Backend API for the Turkish ice cream project."
     version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
+    cors_allow_origin_regex: str = (
+        r"^https?://("
+        r"localhost|"
+        r"127(?:\.\d{1,3}){3}|"
+        r"10(?:\.\d{1,3}){3}|"
+        r"192\.168(?:\.\d{1,3}){2}|"
+        r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}"
+        r")(?::\d+)?$"
+    )
 
 
 settings = Settings()
