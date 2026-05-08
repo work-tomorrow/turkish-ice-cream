@@ -10,7 +10,10 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     project_name: str = "Turkish Ice Cream Core API"
-    description: str = "Backend API for the Turkish ice cream project."
+    description: str = (
+        "Backend API for the Turkish ice cream project, including session, "
+        "vision, emergency stop, and motor calibration controls."
+    )
     version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
     cors_allow_origin_regex: str = (

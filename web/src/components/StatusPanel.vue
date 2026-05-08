@@ -3,38 +3,34 @@
     <template #header>
       <div class="panel-header">
         <span>System Status</span>
-        <el-tag :type="status.running ? 'success' : 'info'">
-          {{ status.running ? 'Running' : 'Idle' }}
+        <el-tag :type="status.system.ready ? 'success' : 'danger'">
+          {{ status.system.ready ? 'Ready' : 'Blocked' }}
         </el-tag>
       </div>
     </template>
 
     <div class="metric-grid">
       <div class="metric">
-        <span>Current Action</span>
-        <strong>{{ formatAction(status.current_action) }}</strong>
-      </div>
-      <div class="metric">
-        <span>Tease Count</span>
-        <strong>{{ status.tease_count }} / {{ status.max_tease }}</strong>
+        <span>Robot State</span>
+        <strong>{{ formatState(status.robot.state) }}</strong>
       </div>
       <div class="metric">
         <span>Hand</span>
-        <strong>{{ status.hand_detected ? 'Detected' : 'Not Found' }}</strong>
+        <strong>{{ status.vision.hand_detected ? 'Detected' : 'Not Found' }}</strong>
       </div>
       <div class="metric">
         <span>Emergency</span>
-        <strong :class="{ danger: status.emergency_stopped }">
-          {{ status.emergency_stopped ? 'Stopped' : 'Clear' }}
+        <strong :class="{ danger: status.system.emergency_stopped }">
+          {{ status.system.emergency_stopped ? 'Stopped' : 'Clear' }}
         </strong>
       </div>
     </div>
 
     <el-descriptions :column="2" border class="hand-table">
-      <el-descriptions-item label="X">{{ displayValue(status.hand?.x) }}</el-descriptions-item>
-      <el-descriptions-item label="Y">{{ displayValue(status.hand?.y) }}</el-descriptions-item>
+      <el-descriptions-item label="X">{{ displayValue(status.vision.hand?.x) }}</el-descriptions-item>
+      <el-descriptions-item label="Y">{{ displayValue(status.vision.hand?.y) }}</el-descriptions-item>
       <el-descriptions-item label="Confidence">
-        {{ displayValue(status.hand?.confidence) }}
+        {{ displayValue(status.vision.hand?.confidence) }}
       </el-descriptions-item>
       <el-descriptions-item label="Last Update">{{ lastUpdated }}</el-descriptions-item>
     </el-descriptions>
@@ -51,7 +47,7 @@ defineProps({
     type: String,
     required: true,
   },
-  formatAction: {
+  formatState: {
     type: Function,
     required: true,
   },

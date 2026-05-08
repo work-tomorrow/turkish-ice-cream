@@ -2,22 +2,25 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packages"))
 
 from motor_control import MotorManager
+from motor_control.config import build_default_motor_configs, build_m1_m4_hardware_configs
+from motor_control.drivers import MG995ServoDriver
+from motor_control.models import MotorKind
 
 
 class MotorManagerTest(unittest.TestCase):
     def setUp(self) -> None:
         self.manager = MotorManager()
         self.targets = {
-            "stepper_1": 10.0,
-            "stepper_2": -10.0,
-            "tt_1": 20.0,
-            "tt_2": -20.0,
-            "pm30225": 30.0,
+            "m1": 10.0,
+            "m2": -10.0,
+            "m3": 45.0,
+            "m4": 135.0,
         }
 
     def tearDown(self) -> None:
@@ -31,18 +34,47 @@ class MotorManagerTest(unittest.TestCase):
             time.sleep(0.01)
         self.fail("condition was not met before timeout")
 
-    def test_loads_five_mixed_motors(self) -> None:
+    def test_loads_four_m1_m4_motors(self) -> None:
         state = self.manager.get_state()
 
-        self.assertEqual(len(state.motors), 5)
-        self.assertEqual(
-            set(state.motors),
-            {"stepper_1", "stepper_2", "tt_1", "tt_2", "pm30225"},
+        self.assertEqual(len(state.motors), 4)
+        self.assertEqual(set(state.motors), {"m1", "m2", "m3", "m4"})
+        self.assertEqual(state.motors["m1"].kind, MotorKind.STEPPER)
+        self.assertEqual(state.motors["m2"].kind, MotorKind.STEPPER)
+        self.assertEqual(state.motors["m3"].kind, MotorKind.SERVO)
+        self.assertEqual(state.motors["m4"].kind, MotorKind.SERVO)
+
+    def test_hardware_config_keeps_adjustable_parameters(self) -> None:
+        configs = build_m1_m4_hardware_configs(
+            stepper_options={
+                "m1": {"step_pin": 17, "dir_pin": 27, "enable_pin": 22},
+                "m2": {"step_pin": 5, "dir_pin": 6, "enable_pin": 13},
+            },
+            servo_options={
+                "m3": {"signal_pin": 18, "min_pulse_us": 600.0},
+                "m4": {"signal_pin": 19, "max_pulse_us": 2400.0},
+            },
         )
+
+        self.assertEqual([config.id for config in configs], ["m1", "m2", "m3", "m4"])
+        self.assertEqual(configs[0].driver_type, "nema17_step_dir")
+        self.assertEqual(configs[2].driver_type, "mg995_servo")
+        self.assertEqual(configs[0].driver_options["step_pin"], 17)
+        self.assertEqual(configs[2].driver_options["min_pulse_us"], 600.0)
+        self.assertEqual(configs[3].driver_options["max_pulse_us"], 2400.0)
+        self.assertEqual(configs[3].driver_options["min_pulse_us"], 500.0)
+
+    def test_default_profile_is_mock_four_motor_config(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            configs = build_default_motor_configs()
+
+        self.assertEqual([config.id for config in configs], ["m1", "m2", "m3", "m4"])
+        self.assertEqual(configs[0].driver_type, "mock_stepper")
+        self.assertEqual(configs[2].driver_type, "mock_servo")
 
     def test_rejects_incomplete_targets(self) -> None:
         targets = dict(self.targets)
-        targets.pop("tt_2")
+        targets.pop("m4")
 
         with self.assertRaises(ValueError):
             self.manager.set_target(targets, duration_ms=500)
@@ -56,7 +88,7 @@ class MotorManagerTest(unittest.TestCase):
 
     def test_rejects_out_of_range_angle(self) -> None:
         targets = dict(self.targets)
-        targets["tt_1"] = 999.0
+        targets["m3"] = 999.0
 
         with self.assertRaises(ValueError):
             self.manager.set_target(targets, duration_ms=500)
@@ -70,39 +102,28 @@ class MotorManagerTest(unittest.TestCase):
         self.manager.start()
 
         self.manager.set_target(self.targets, duration_ms=500)
-        self.wait_until(
-            lambda: self.manager.get_state().motors["pm30225"].current_angle
-            == 30.0
-        )
+        self.wait_until(lambda: self.manager.get_state().motors["m4"].current_angle == 135.0)
 
         state = self.manager.get_state()
-        self.assertEqual(state.motors["stepper_1"].current_angle, 10.0)
-        self.assertEqual(state.motors["tt_1"].current_angle, 20.0)
-        self.assertEqual(state.motors["pm30225"].current_angle, 30.0)
-        self.assertTrue(state.motors["tt_1"].approximate)
+        self.assertEqual(state.motors["m1"].current_angle, 10.0)
+        self.assertEqual(state.motors["m2"].current_angle, -10.0)
+        self.assertEqual(state.motors["m3"].current_angle, 45.0)
+        self.assertEqual(state.motors["m4"].current_angle, 135.0)
+        self.assertIn("UPDATE_SERVO", state.motors["m4"].last_command or "")
 
     def test_new_target_overwrites_previous_command(self) -> None:
         self.manager.home_all()
         self.manager.start()
         self.manager.set_target(self.targets, duration_ms=500)
 
-        next_targets = {
-            "stepper_1": 1.0,
-            "stepper_2": 2.0,
-            "tt_1": 3.0,
-            "tt_2": 4.0,
-            "pm30225": 5.0,
-        }
+        next_targets = {"m1": 1.0, "m2": 2.0, "m3": 3.0, "m4": 4.0}
         self.manager.set_target(next_targets, duration_ms=250)
-        self.wait_until(
-            lambda: self.manager.get_state().motors["pm30225"].current_angle
-            == 5.0
-        )
+        self.wait_until(lambda: self.manager.get_state().motors["m4"].current_angle == 4.0)
 
         state = self.manager.get_state()
-        self.assertEqual(state.motors["stepper_1"].target_angle, 1.0)
-        self.assertEqual(state.motors["pm30225"].target_angle, 5.0)
-        self.assertIn("250", state.motors["pm30225"].last_command or "")
+        self.assertEqual(state.motors["m1"].target_angle, 1.0)
+        self.assertEqual(state.motors["m4"].target_angle, 4.0)
+        self.assertIn("250", state.motors["m4"].last_command or "")
 
     def test_set_target_does_not_execute_before_start(self) -> None:
         self.manager.home_all()
@@ -110,61 +131,39 @@ class MotorManagerTest(unittest.TestCase):
         self.manager.set_target(self.targets, duration_ms=500)
         state = self.manager.get_state()
 
-        self.assertEqual(state.motors["pm30225"].current_angle, 0.0)
+        self.assertEqual(state.motors["m4"].current_angle, 90.0)
 
     def test_latest_target_before_start_overwrites_previous_target(self) -> None:
         self.manager.home_all()
-        next_targets = {
-            "stepper_1": 1.0,
-            "stepper_2": 2.0,
-            "tt_1": 3.0,
-            "tt_2": 4.0,
-            "pm30225": 5.0,
-        }
+        next_targets = {"m1": 1.0, "m2": 2.0, "m3": 3.0, "m4": 4.0}
 
         self.manager.set_target(self.targets, duration_ms=500)
         self.manager.set_target(next_targets, duration_ms=250)
         self.manager.start()
-        self.wait_until(
-            lambda: self.manager.get_state().motors["pm30225"].current_angle
-            == 5.0
-        )
+        self.wait_until(lambda: self.manager.get_state().motors["m4"].current_angle == 4.0)
 
         state = self.manager.get_state()
-        self.assertEqual(state.motors["pm30225"].target_angle, 5.0)
-        self.assertNotEqual(state.motors["pm30225"].target_angle, 30.0)
+        self.assertEqual(state.motors["m4"].target_angle, 4.0)
+        self.assertNotEqual(state.motors["m4"].target_angle, 135.0)
 
     def test_latest_target_updates_while_control_loop_is_running(self) -> None:
         self.manager.home_all()
         self.manager.start()
-        first_targets = {
-            "stepper_1": 50.0,
-            "stepper_2": 40.0,
-            "tt_1": 30.0,
-            "tt_2": 20.0,
-            "pm30225": 10.0,
-        }
-        latest_targets = {
-            "stepper_1": -5.0,
-            "stepper_2": -4.0,
-            "tt_1": -3.0,
-            "tt_2": -2.0,
-            "pm30225": -1.0,
-        }
+        first_targets = {"m1": 50.0, "m2": 40.0, "m3": 30.0, "m4": 20.0}
+        latest_targets = {"m1": -5.0, "m2": -4.0, "m3": 3.0, "m4": 2.0}
 
         self.manager.set_target(first_targets, duration_ms=1000)
         time.sleep(0.05)
         self.manager.set_target(latest_targets, duration_ms=100)
         self.wait_until(
-            lambda: self.manager.get_state().motors["pm30225"].current_angle
-            == -1.0,
+            lambda: self.manager.get_state().motors["m4"].current_angle == 2.0,
             timeout=1.5,
         )
 
         state = self.manager.get_state()
-        self.assertEqual(state.motors["stepper_1"].target_angle, -5.0)
-        self.assertEqual(state.motors["pm30225"].target_angle, -1.0)
-        self.assertIn("100", state.motors["pm30225"].last_command or "")
+        self.assertEqual(state.motors["m1"].target_angle, -5.0)
+        self.assertEqual(state.motors["m4"].target_angle, 2.0)
+        self.assertIn("100", state.motors["m4"].last_command or "")
 
     def test_repeated_set_target_and_get_state_while_running(self) -> None:
         self.manager.home_all()
@@ -173,17 +172,11 @@ class MotorManagerTest(unittest.TestCase):
         for index in range(20):
             angle = float(index % 5)
             self.manager.set_target(
-                {
-                    "stepper_1": angle,
-                    "stepper_2": angle,
-                    "tt_1": angle,
-                    "tt_2": angle,
-                    "pm30225": angle,
-                },
+                {"m1": angle, "m2": angle, "m3": angle, "m4": angle},
                 duration_ms=50,
             )
             state = self.manager.get_state()
-            self.assertEqual(len(state.motors), 5)
+            self.assertEqual(len(state.motors), 4)
 
     def test_emergency_stop_stops_manager(self) -> None:
         self.manager.start()
@@ -192,6 +185,58 @@ class MotorManagerTest(unittest.TestCase):
         state = self.manager.get_state()
 
         self.assertFalse(state.running)
+
+    def test_set_current_angle_zero_updates_one_motor_state(self) -> None:
+        self.manager.home_all()
+        self.manager.start()
+        self.manager.set_target(self.targets, duration_ms=100)
+        self.wait_until(lambda: self.manager.get_state().motors["m3"].current_angle == 45.0)
+
+        self.manager.set_current_angle_zero("m3")
+
+        state = self.manager.get_state()
+        self.assertEqual(state.motors["m3"].current_angle, 0.0)
+        self.assertEqual(state.motors["m3"].target_angle, 0.0)
+        self.assertEqual(state.motors["m4"].current_angle, 135.0)
+
+    def test_set_current_angle_zero_updates_all_motor_states(self) -> None:
+        self.manager.home_all()
+        self.manager.start()
+        self.manager.set_target(self.targets, duration_ms=100)
+        self.wait_until(lambda: self.manager.get_state().motors["m4"].current_angle == 135.0)
+
+        self.manager.set_current_angle_zero()
+
+        state = self.manager.get_state()
+        self.assertTrue(
+            all(motor.current_angle == 0.0 for motor in state.motors.values())
+        )
+        self.assertTrue(
+            all(motor.target_angle == 0.0 for motor in state.motors.values())
+        )
+
+    def test_set_current_angle_zero_resets_stepper_current_steps(self) -> None:
+        self.manager.home_all()
+        self.manager.start()
+        self.manager.set_target(self.targets, duration_ms=100)
+        self.wait_until(lambda: self.manager.get_state().motors["m1"].current_angle == 10.0)
+
+        self.manager.set_current_angle_zero("m1")
+
+        stepper = self.manager._controllers["m1"]
+        self.assertEqual(self.manager.get_state().motors["m1"].current_angle, 0.0)
+        self.assertEqual(stepper.current_steps, 0)
+
+    def test_set_current_angle_zero_rejects_unknown_motor(self) -> None:
+        with self.assertRaises(ValueError):
+            self.manager.set_current_angle_zero("unknown")
+
+    def test_mg995_servo_driver_converts_angle_to_duty_cycle(self) -> None:
+        driver = MG995ServoDriver(signal_pin=18)
+
+        self.assertAlmostEqual(driver._angle_to_duty_cycle(0.0), 2.5)
+        self.assertAlmostEqual(driver._angle_to_duty_cycle(90.0), 7.5)
+        self.assertAlmostEqual(driver._angle_to_duty_cycle(180.0), 12.5)
 
 
 if __name__ == "__main__":

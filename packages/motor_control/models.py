@@ -11,6 +11,7 @@ class MotorKind(str, Enum):
     """Supported motor categories."""
 
     STEPPER = "stepper"
+    SERVO = "servo"
     TT = "tt"
     PM30225_SERIAL = "pm30225_serial"
 

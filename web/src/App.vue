@@ -7,7 +7,7 @@
         <StatusPanel
           :status="status"
           :last-updated="lastUpdated"
-          :format-action="formatAction"
+          :format-state="formatState"
           :display-value="displayValue"
         />
         <VisionPanel
@@ -30,16 +30,15 @@
           @reset="resetSession"
           @stop="stopSession"
         />
-        <ActionsPanel
-          :actions="actions"
-          :current-action="status.current_action"
-          :emergency-stopped="status.emergency_stopped"
+        <MotorCalibrationPanel
+          :motors="motors"
+          :emergency-stopped="status.system.emergency_stopped"
           :busy="busy"
-          :format-action="formatAction"
-          @run-action="runAction"
+          @jog-motor="jogMotor"
+          @zero-motor="zeroMotor"
         />
         <EmergencyPanel
-          :emergency-stopped="status.emergency_stopped"
+          :emergency-stopped="status.system.emergency_stopped"
           :busy="busy"
           @stop="setEmergencyStop"
           @clear="clearEmergencyStop"
@@ -53,37 +52,48 @@
 import axios from 'axios'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import ActionsPanel from './components/ActionsPanel.vue'
 import AppHeader from './components/AppHeader.vue'
 import EmergencyPanel from './components/EmergencyPanel.vue'
+import MotorCalibrationPanel from './components/MotorCalibrationPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import StatusPanel from './components/StatusPanel.vue'
 import VisionPanel from './components/VisionPanel.vue'
 
 const defaultStatus = {
-  running: false,
-  emergency_stopped: false,
-  current_action: 'home',
-  tease_count: 0,
-  max_tease: 3,
-  hand_detected: false,
-  hand: {
-    detected: false,
-    x: null,
-    y: null,
-    confidence: null,
+  system: {
+    ready: true,
+    emergency_stopped: false,
+  },
+  robot: {
+    state: 'idle',
+  },
+  vision: {
+    hand_detected: false,
+    hand: {
+      detected: false,
+      x: null,
+      y: null,
+      confidence: null,
+    },
   },
 }
 
-const status = reactive({ ...defaultStatus, hand: { ...defaultStatus.hand } })
+const status = reactive({
+  system: { ...defaultStatus.system },
+  robot: { ...defaultStatus.robot },
+  vision: {
+    ...defaultStatus.vision,
+    hand: { ...defaultStatus.vision.hand },
+  },
+})
 const session = reactive({
   active: false,
-  current_action: 'home',
+  robot_state: 'idle',
   tease_count: 0,
   max_tease: 3,
 })
 
-const actions = ref([])
+const motors = ref([])
 const maxTease = ref(3)
 const editingMaxTease = ref(false)
 const loading = ref(false)
@@ -114,20 +124,17 @@ const lastUpdated = computed(() => {
 })
 
 const applyStatus = (payload) => {
-  Object.assign(status, payload)
-  status.hand = payload.hand || { ...defaultStatus.hand }
-  session.active = payload.running
-  session.current_action = payload.current_action
-  session.tease_count = payload.tease_count
-  session.max_tease = payload.max_tease
-  if (!editingMaxTease.value) {
-    maxTease.value = payload.max_tease
+  status.system = payload.system || { ...defaultStatus.system }
+  status.robot = payload.robot || { ...defaultStatus.robot }
+  status.vision = payload.vision || {
+    ...defaultStatus.vision,
+    hand: { ...defaultStatus.vision.hand },
   }
   apiOnline.value = true
   updatedAt.value = new Date()
 }
 
-const formatAction = (value) => {
+const formatState = (value) => {
   if (!value) return '-'
   return value
     .split('_')
@@ -154,17 +161,20 @@ const refreshStatus = async () => {
 const refreshSession = async () => {
   const res = await axios.get('/session')
   Object.assign(session, res.data)
+  if (!editingMaxTease.value) {
+    maxTease.value = res.data.max_tease
+  }
 }
 
-const refreshActions = async () => {
-  const res = await axios.get('/actions')
-  actions.value = res.data.actions || []
+const refreshMotors = async () => {
+  const res = await axios.get('/motors')
+  motors.value = res.data.motors || []
 }
 
 const refreshAll = async () => {
   loading.value = true
   try {
-    await Promise.all([refreshStatus(), refreshSession(), refreshActions()])
+    await Promise.all([refreshStatus(), refreshSession(), refreshMotors()])
   } catch (error) {
     apiOnline.value = false
     showError('API request failed', error)
@@ -206,9 +216,18 @@ const stopSession = () =>
     await axios.delete('/session')
   })
 
-const runAction = (action) =>
-  withBusy(action, async () => {
-    await axios.post('/actions', { name: action })
+const jogMotor = ({ motorId, direction }) =>
+  withBusy(`${motorId}-${direction}`, async () => {
+    await axios.post(`/motors/${motorId}/jog`, {
+      direction,
+      step_degrees: 3,
+    })
+  })
+
+const zeroMotor = (motorId) =>
+  withBusy(motorId ? `${motorId}-zero` : 'zero-all', async () => {
+    await axios.post(motorId ? `/motors/${motorId}/zero` : '/motors/zero')
+    ElMessage.success(motorId ? `${motorId} set to 0 deg` : 'All motor angles set to 0 deg')
   })
 
 const setEmergencyStop = () =>

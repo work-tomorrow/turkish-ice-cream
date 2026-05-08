@@ -31,6 +31,8 @@ class MotorController(Protocol):
 
     def get_state(self) -> MotorState: ...
 
+    def set_current_angle_zero(self) -> None: ...
+
 
 class BaseController:
     """Shared state handling for all motor types."""
@@ -72,6 +74,17 @@ class BaseController:
     def get_state(self) -> MotorState:
         with self._lock:
             return MotorState(**self.state.__dict__)
+
+    def set_current_angle_zero(self) -> None:
+        """Redefine the controller's current internal angle as zero degrees."""
+
+        with self._lock:
+            self.state.current_angle = 0.0
+            self.state.target_angle = 0.0
+            self.state.moving = False
+            self._active_command_id = 0
+            self._move_start_angle = 0.0
+            self._move_elapsed_ms = 0.0
 
     def _ensure_ready(self) -> None:
         if not self.state.ready:

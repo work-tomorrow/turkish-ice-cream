@@ -97,6 +97,53 @@ eval "$(poetry env activate)"
 poetry run python -m core
 ```
 
+### Motors API
+
+The core service exposes motor state and calibration controls under `/motors`:
+
+| Method | Path                    | Purpose                                      |
+| ------ | ----------------------- | -------------------------------------------- |
+| GET    | `/motors`               | List each motor's current angle, limits, and jog step size. |
+| POST   | `/motors/{motor_id}/jog`  | Jog one motor in the `positive` or `negative` direction. |
+| POST   | `/motors/{motor_id}/zero` | Treat one motor's current position as zero degrees. |
+| POST   | `/motors/zero`          | Treat all motors' current positions as zero degrees. |
+
+Example jog request:
+
+```json
+{
+  "direction": "positive",
+  "step_degrees": 3
+}
+```
+
+### Status API
+
+`GET /status` returns overall runtime status without demo counters:
+
+```json
+{
+  "system": {
+    "ready": true,
+    "emergency_stopped": false
+  },
+  "robot": {
+    "state": "idle"
+  },
+  "vision": {
+    "hand_detected": false,
+    "hand": {
+      "detected": false,
+      "x": null,
+      "y": null,
+      "confidence": null
+    }
+  }
+}
+```
+
+`robot.state` is one of `idle`, `started`, `stopping`, or `error`. Session counters such as `tease_count` and `max_tease` stay under `/session`.
+
 ### Other Commands
 
 | Goal                      | Command                            |

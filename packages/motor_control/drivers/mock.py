@@ -43,6 +43,24 @@ class MockTTDriver:
         self.stopped = True
 
 
+class MockServoDriver:
+    """In-memory stand-in for an MG995 servo PWM driver."""
+
+    def __init__(self) -> None:
+        self.angle: float | None = None
+        self.stopped = False
+
+    def setup(self) -> None:
+        self.stopped = False
+
+    def set_angle(self, angle: float) -> None:
+        self.angle = angle
+        self.stopped = False
+
+    def stop(self) -> None:
+        self.stopped = True
+
+
 class MockPM30225Driver:
     """In-memory stand-in for the PM30225 coreless motor controller."""
 

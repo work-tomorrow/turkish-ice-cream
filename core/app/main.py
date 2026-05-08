@@ -4,19 +4,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.app.config import settings
-from core.app.models import ActionName, Hand
+from core.app.models import Hand, RobotState
 from core.app.router import api_router
+from motor_control import MotorManager
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.running = False
     app.state.emergency_stopped = False
-    app.state.current_action = ActionName.home
+    app.state.robot_state = RobotState.idle
     app.state.tease_count = 0
     app.state.max_tease = 10
     app.state.hand = Hand()
-    yield
+    app.state.motor_manager = MotorManager()
+    app.state.motor_manager_ready = False
+    try:
+        yield
+    finally:
+        app.state.motor_manager.cleanup()
 
 
 app = FastAPI(

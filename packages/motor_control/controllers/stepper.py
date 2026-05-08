@@ -21,6 +21,11 @@ class StepperController(BaseController):
         with self._lock:
             self.current_steps = self._angle_to_steps(self.config.home_angle)
 
+    def set_current_angle_zero(self) -> None:
+        super().set_current_angle_zero()
+        with self._lock:
+            self.current_steps = self._angle_to_steps(0.0)
+
     def move_to(self, angle: float, duration_ms: int) -> None:
         self._ensure_ready()
         target_steps = self._angle_to_steps(angle)

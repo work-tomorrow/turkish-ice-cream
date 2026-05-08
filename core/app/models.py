@@ -4,16 +4,16 @@ from typing import Optional
 from pydantic import BaseModel, Field
 
 
-class ActionName(str, Enum):
-    home = "home"
-    present = "present"
-    pull_back = "pull_back"
-    dodge_left = "dodge_left"
-    dodge_right = "dodge_right"
-    dodge_up = "dodge_up"
-    spin = "spin"
-    give = "give"
-    stop = "stop"
+class RobotState(str, Enum):
+    idle = "idle"
+    started = "started"
+    stopping = "stopping"
+    error = "error"
+
+
+class MotorDirection(str, Enum):
+    positive = "positive"
+    negative = "negative"
 
 
 class MessageResponse(BaseModel):
@@ -32,38 +32,71 @@ class Hand(BaseModel):
     confidence: Optional[float] = None
 
 
-class StatusResponse(BaseModel):
-    running: bool
+class StatusSystem(BaseModel):
+    ready: bool
     emergency_stopped: bool
-    current_action: ActionName
-    tease_count: int
-    max_tease: int
+
+
+class StatusRobot(BaseModel):
+    state: RobotState
+
+
+class StatusVision(BaseModel):
     hand_detected: bool
     hand: Hand
 
 
-class ActionsResponse(BaseModel):
-    actions: list[ActionName]
+class StatusResponse(BaseModel):
+    system: StatusSystem
+    robot: StatusRobot
+    vision: StatusVision
 
 
-class ActionRequest(BaseModel):
-    name: str
+class MotorsResponse(BaseModel):
+    motors: list["MotorStatus"]
 
 
-class ActionResult(BaseModel):
-    name: ActionName
+class MotorJogRequest(BaseModel):
+    direction: MotorDirection
+    step_degrees: float = Field(
+        3.0,
+        gt=0,
+        le=10,
+        description="Relative move size in degrees.",
+    )
+
+
+class MotorJogResult(BaseModel):
+    motor_id: str
+    delta_degrees: float
+    current_angle: float
     status: str
 
 
-class ActionCommandResponse(BaseModel):
+class MotorJogResponse(BaseModel):
     ok: bool
-    action: ActionResult
-    current_action: ActionName
+    action: MotorJogResult
+    robot_state: RobotState
+
+
+class MotorStatus(BaseModel):
+    id: str
+    current_angle: float
+    min_angle: float
+    max_angle: float
+    step_degrees: float = 3.0
+
+
+class MotorZeroResponse(BaseModel):
+    ok: bool
+    zeroed_motor_ids: list[str]
+    motors: list[MotorStatus]
+    robot_state: RobotState
 
 
 class SessionResponse(BaseModel):
     active: bool
-    current_action: ActionName
+    robot_state: RobotState
     tease_count: int
     max_tease: int
 
@@ -101,17 +134,17 @@ class SessionPatchResponse(BaseModel):
 class SessionDeleteResponse(BaseModel):
     ok: bool
     session: SessionActiveResponse
-    current_action: ActionName
+    robot_state: RobotState
 
 
 class EmergencyStopSetResponse(BaseModel):
     ok: bool
     emergency_stopped: bool
     running: bool
-    current_action: ActionName
+    robot_state: RobotState
 
 
 class EmergencyStopClearResponse(BaseModel):
     ok: bool
     emergency_stopped: bool
-    current_action: ActionName
+    robot_state: RobotState

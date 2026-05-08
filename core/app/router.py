@@ -5,15 +5,12 @@ from fastapi import APIRouter, HTTPException, Request, Response, WebSocket
 from fastapi import WebSocketDisconnect
 
 from core.app.models import (
-    ActionCommandResponse,
-    ActionName,
-    ActionRequest,
-    ActionResult,
-    ActionsResponse,
     EmergencyStopClearResponse,
     EmergencyStopSetResponse,
     MessageResponse,
     PingResponse,
+    MotorsResponse,
+    MotorStatus,
     SessionCreateRequest,
     SessionCreateResponse,
     SessionActiveResponse,
@@ -22,10 +19,24 @@ from core.app.models import (
     SessionPatchResponse,
     SessionResponse,
     SessionSummary,
+    StatusRobot,
     StatusResponse,
+    StatusSystem,
+    StatusVision,
+    MotorDirection,
+    MotorJogRequest,
+    MotorJogResponse,
+    MotorJogResult,
+    MotorZeroResponse,
+    RobotState,
 )
+from motor_control.config import DEFAULT_MOTOR_CONFIGS
 
 api_router = APIRouter()
+
+MOTOR_CONFIGS_BY_ID = {config.id: config for config in DEFAULT_MOTOR_CONFIGS}
+DEFAULT_STEP_DEGREES = 3.0
+CALIBRATION_MOVE_DURATION_MS = 300
 
 PLACEHOLDER_JPEG = base64.b64decode(
     "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
@@ -42,20 +53,19 @@ PLACEHOLDER_JPEG = base64.b64decode(
 def _status_payload(request: Request | WebSocket) -> StatusResponse:
     hand = request.app.state.hand
     return StatusResponse(
-        running=request.app.state.running,
-        emergency_stopped=request.app.state.emergency_stopped,
-        current_action=request.app.state.current_action,
-        tease_count=request.app.state.tease_count,
-        max_tease=request.app.state.max_tease,
-        hand_detected=hand.detected,
-        hand=hand,
+        system=StatusSystem(
+            ready=not request.app.state.emergency_stopped,
+            emergency_stopped=request.app.state.emergency_stopped,
+        ),
+        robot=StatusRobot(state=request.app.state.robot_state),
+        vision=StatusVision(hand_detected=hand.detected, hand=hand),
     )
 
 
 def _session_payload(request: Request) -> SessionResponse:
     return SessionResponse(
         active=request.app.state.running,
-        current_action=request.app.state.current_action,
+        robot_state=request.app.state.robot_state,
         tease_count=request.app.state.tease_count,
         max_tease=request.app.state.max_tease,
     )
@@ -74,6 +84,42 @@ def _ensure_not_emergency_stopped(request: Request) -> None:
         raise HTTPException(status_code=423, detail="Emergency stop is active")
 
 
+def _ensure_motor_id(motor_id: str) -> None:
+    if motor_id not in MOTOR_CONFIGS_BY_ID:
+        raise HTTPException(status_code=400, detail=f"Unknown motor id: {motor_id}")
+
+
+def _ensure_motor_manager_ready(request: Request) -> None:
+    if request.app.state.motor_manager_ready:
+        return
+
+    try:
+        request.app.state.motor_manager.start()
+        request.app.state.motor_manager.home_all()
+    except Exception as exc:
+        request.app.state.motor_manager_ready = False
+        raise HTTPException(
+            status_code=500,
+            detail=f"Motor manager failed to initialize: {exc}",
+        ) from exc
+
+    request.app.state.motor_manager_ready = True
+
+
+def _motor_payload(request: Request) -> list[MotorStatus]:
+    state = request.app.state.motor_manager.get_state()
+    return [
+        MotorStatus(
+            id=config.id,
+            current_angle=state.motors[config.id].current_angle,
+            min_angle=config.min_angle,
+            max_angle=config.max_angle,
+            step_degrees=DEFAULT_STEP_DEGREES,
+        )
+        for config in DEFAULT_MOTOR_CONFIGS
+    ]
+
+
 @api_router.get("/", response_model=MessageResponse, tags=["health"])
 async def root() -> MessageResponse:
     """Check whether the core API is reachable."""
@@ -88,7 +134,7 @@ async def ping() -> PingResponse:
 
 @api_router.get("/status", response_model=StatusResponse, tags=["status"])
 async def get_status(request: Request) -> StatusResponse:
-    """Return the current demo, robot action, and hand detection status."""
+    """Return structured system, robot lifecycle, and vision status."""
     return _status_payload(request)
 
 
@@ -114,7 +160,7 @@ async def create_session(
     request.app.state.running = True
     request.app.state.max_tease = req.max_tease
     request.app.state.tease_count = 0
-    request.app.state.current_action = ActionName.present
+    request.app.state.robot_state = RobotState.started
     return SessionCreateResponse(ok=True, session=_session_summary(request))
 
 
@@ -131,8 +177,9 @@ async def update_session(
         request.app.state.tease_count = 0
     if req.active is not None:
         request.app.state.running = req.active
-        if req.active:
-            request.app.state.current_action = ActionName.present
+        request.app.state.robot_state = (
+            RobotState.started if req.active else RobotState.idle
+        )
 
     return SessionPatchResponse(ok=True, session=_session_summary(request))
 
@@ -140,38 +187,126 @@ async def update_session(
 @api_router.delete("/session", response_model=SessionDeleteResponse, tags=["session"])
 async def delete_session(request: Request) -> SessionDeleteResponse:
     """Stop the current demo session and return the robot to home."""
+    request.app.state.robot_state = RobotState.stopping
     request.app.state.running = False
-    request.app.state.current_action = ActionName.home
+    request.app.state.robot_state = RobotState.idle
     return SessionDeleteResponse(
         ok=True,
         session=SessionActiveResponse(active=False),
-        current_action=request.app.state.current_action,
+        robot_state=request.app.state.robot_state,
     )
 
 
-@api_router.get("/actions", response_model=ActionsResponse, tags=["actions"])
-async def get_actions() -> ActionsResponse:
-    """List every robot action that can be triggered manually."""
-    return ActionsResponse(actions=list(ActionName))
+@api_router.get("/motors", response_model=MotorsResponse, tags=["motors"])
+async def get_motors(request: Request) -> MotorsResponse:
+    """List all motor states and jog step sizes."""
+    return MotorsResponse(
+        motors=_motor_payload(request),
+    )
 
 
-@api_router.post("/actions", response_model=ActionCommandResponse, tags=["actions"])
-async def run_action(
-    req: ActionRequest,
+@api_router.post(
+    "/motors/{motor_id}/jog",
+    response_model=MotorJogResponse,
+    tags=["motors"],
+)
+async def jog_motor(
+    motor_id: str,
+    req: MotorJogRequest,
     request: Request,
-) -> ActionCommandResponse:
-    """Execute one manual robot action command as a stub state update."""
+) -> MotorJogResponse:
+    """Move one motor by a small relative angle for initial calibration."""
     _ensure_not_emergency_stopped(request)
-    try:
-        action_name = ActionName(req.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Unknown action") from exc
+    _ensure_motor_id(motor_id)
+    _ensure_motor_manager_ready(request)
 
-    request.app.state.current_action = action_name
-    return ActionCommandResponse(
+    config = MOTOR_CONFIGS_BY_ID[motor_id]
+    delta_degrees = req.step_degrees
+    if req.direction is MotorDirection.negative:
+        delta_degrees *= -1
+
+    manager_state = request.app.state.motor_manager.get_state()
+    next_angle = manager_state.motors[motor_id].current_angle + delta_degrees
+    if next_angle < config.min_angle or next_angle > config.max_angle:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Motor {motor_id} angle {next_angle} outside "
+                f"[{config.min_angle}, {config.max_angle}]"
+            ),
+        )
+
+    targets = {
+        motor_id: motor_state.target_angle
+        for motor_id, motor_state in manager_state.motors.items()
+    }
+    targets[motor_id] = next_angle
+    try:
+        request.app.state.motor_manager.set_target(
+            targets,
+            duration_ms=CALIBRATION_MOVE_DURATION_MS,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return MotorJogResponse(
         ok=True,
-        action=ActionResult(name=action_name, status="executed"),
-        current_action=action_name,
+        action=MotorJogResult(
+            motor_id=motor_id,
+            delta_degrees=delta_degrees,
+            current_angle=next_angle,
+            status="moved",
+        ),
+        robot_state=request.app.state.robot_state,
+    )
+
+
+@api_router.post("/motors/zero", response_model=MotorZeroResponse, tags=["motors"])
+async def zero_all_motors(request: Request) -> MotorZeroResponse:
+    """Treat the current motor position as zero degrees for calibration."""
+    _ensure_not_emergency_stopped(request)
+    _ensure_motor_manager_ready(request)
+
+    motor_ids = list(MOTOR_CONFIGS_BY_ID)
+    try:
+        request.app.state.motor_manager.set_current_angle_zero()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return MotorZeroResponse(
+        ok=True,
+        zeroed_motor_ids=motor_ids,
+        motors=_motor_payload(request),
+        robot_state=request.app.state.robot_state,
+    )
+
+
+@api_router.post(
+    "/motors/{motor_id}/zero",
+    response_model=MotorZeroResponse,
+    tags=["motors"],
+)
+async def zero_motor(
+    motor_id: str,
+    request: Request,
+) -> MotorZeroResponse:
+    """Treat one motor's current position as zero degrees for calibration."""
+    _ensure_not_emergency_stopped(request)
+    _ensure_motor_id(motor_id)
+    _ensure_motor_manager_ready(request)
+
+    try:
+        request.app.state.motor_manager.set_current_angle_zero(motor_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return MotorZeroResponse(
+        ok=True,
+        zeroed_motor_ids=[motor_id],
+        motors=_motor_payload(request),
+        robot_state=request.app.state.robot_state,
     )
 
 
@@ -190,12 +325,14 @@ async def set_emergency_stop(request: Request) -> EmergencyStopSetResponse:
     """Activate emergency stop and halt the current demo session."""
     request.app.state.running = False
     request.app.state.emergency_stopped = True
-    request.app.state.current_action = ActionName.stop
+    request.app.state.motor_manager.emergency_stop()
+    request.app.state.motor_manager_ready = False
+    request.app.state.robot_state = RobotState.error
     return EmergencyStopSetResponse(
         ok=True,
         emergency_stopped=True,
         running=False,
-        current_action=request.app.state.current_action,
+        robot_state=request.app.state.robot_state,
     )
 
 
@@ -207,11 +344,11 @@ async def set_emergency_stop(request: Request) -> EmergencyStopSetResponse:
 async def clear_emergency_stop(request: Request) -> EmergencyStopClearResponse:
     """Clear emergency stop and return the robot action state to home."""
     request.app.state.emergency_stopped = False
-    request.app.state.current_action = ActionName.home
+    request.app.state.robot_state = RobotState.idle
     return EmergencyStopClearResponse(
         ok=True,
         emergency_stopped=False,
-        current_action=request.app.state.current_action,
+        robot_state=request.app.state.robot_state,
     )
 
 

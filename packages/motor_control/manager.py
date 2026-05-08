@@ -8,13 +8,16 @@ from time import monotonic
 
 from motor_control.config import DEFAULT_MOTOR_CONFIGS
 from motor_control.controllers import (
+    MG995ServoController,
     MotorController,
     PM30225Controller,
     StepperController,
     TTController,
 )
 from motor_control.drivers import (
+    MG995ServoDriver,
     MockPM30225Driver,
+    MockServoDriver,
     MockStepperDriver,
     MockTTDriver,
     PM30225SerialDriver,
@@ -125,6 +128,24 @@ class MotorManager:
             },
         )
 
+    def set_current_angle_zero(self, motor_id: str | None = None) -> None:
+        """Redefine one or all controllers' current internal angle as zero."""
+
+        if motor_id is not None and motor_id not in self._controllers:
+            raise ValueError(f"Unknown motor id: {motor_id}")
+
+        controllers = (
+            [self._controllers[motor_id]]
+            if motor_id is not None
+            else list(self._controllers.values())
+        )
+
+        with self._command_condition:
+            self._latest_command = None
+
+        for controller in controllers:
+            controller.set_current_angle_zero()
+
     def emergency_stop(self) -> None:
         """Immediately stop all motors."""
 
@@ -213,8 +234,8 @@ class MotorManager:
         self,
         configs: list[MotorConfig],
     ) -> dict[str, MotorController]:
-        if len(configs) != 5:
-            raise ValueError("MotorManager expects exactly 5 motor configs")
+        if not configs:
+            raise ValueError("MotorManager expects at least one motor config")
 
         controllers: dict[str, MotorController] = {}
         for config in configs:
@@ -227,10 +248,18 @@ class MotorManager:
         if config.kind is MotorKind.STEPPER:
             if config.driver_type == "mock_stepper":
                 return StepperController(config, MockStepperDriver())
-            if config.driver_type == "step_dir":
+            if config.driver_type in {"step_dir", "nema17_step_dir"}:
                 return StepperController(
                     config,
                     StepDirStepperDriver(**config.driver_options),
+                )
+        elif config.kind is MotorKind.SERVO:
+            if config.driver_type == "mock_servo":
+                return MG995ServoController(config, MockServoDriver())
+            if config.driver_type in {"mg995", "mg995_servo"}:
+                return MG995ServoController(
+                    config,
+                    MG995ServoDriver(**config.driver_options),
                 )
         elif config.kind is MotorKind.TT:
             if config.driver_type == "mock_tt":

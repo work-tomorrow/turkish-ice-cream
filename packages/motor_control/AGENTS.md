@@ -18,13 +18,12 @@ manager.home_all()
 manager.set_target(targets, duration_ms)
 ```
 
-The current robot has 5 motors:
+The current robot has 4 motors:
 
-- 2 stepper motors: `stepper_1`, `stepper_2`
-- 2 TT motors: `tt_1`, `tt_2`
-- 1 PM30225 coreless motor from 強茂 over Serial/UART: `pm30225`
+- 2 stepper motors: `m1`, `m2`
+- 2 MG995 servo motors: `m3`, `m4`
 
-Upper layers should not need to know which motor is stepper, TT, or PM30225
+Upper layers should not need to know which motor is stepper or servo
 controlled.
 
 ## Hard Rules
@@ -35,7 +34,7 @@ controlled.
 - Do not make upper layers choose driver types, pins, protocols, or motor
   hardware details.
 - Preserve the `set_target(targets: dict[str, float], duration_ms: int)` contract.
-- `set_target()` must require exactly all 5 known motor ids.
+- `set_target()` must require exactly all configured motor ids.
 - New targets overwrite previous targets. Do not add a movement queue unless
   the user explicitly changes the product requirement.
 - `set_target()` must not execute motor movement directly. It should validate
@@ -60,16 +59,15 @@ controlled.
 Before changing behavior, inspect these files:
 
 - `manager.py`: public API, target validation, controller construction.
-- `config.py`: default 5-motor configuration and ids.
+- `config.py`: default 4-motor configuration, ids, and tunable hardware
+  parameters.
 - `models.py`: shared data structures and motor kinds.
 - `controllers/base.py`: controller protocol and shared state handling.
 - `controllers/stepper.py`: stepper angle-to-step behavior and homing state.
-- `controllers/tt.py`: TT angle behavior, currently approximate.
-- `controllers/pm30225.py`: serial command formatting for the PM30225 motor.
+- `controllers/servo.py`: MG995 servo angle behavior.
 - `drivers/mock.py`: mock drivers for local tests.
 - `drivers/stepper.py`: TODO STEP/DIR Raspberry Pi driver.
-- `drivers/tt.py`: TODO TT motor PWM/direction driver.
-- `drivers/pm30225.py`: TODO Serial/UART PM30225 driver.
+- `drivers/servo.py`: Raspberry Pi PWM driver for MG995 servos.
 - `tests/test_motor_control.py`: current behavior contract.
 
 ## Current Architecture
@@ -112,16 +110,12 @@ Controller vs driver rule of thumb:
   the manager control loop applies it after `start()` is called.
 - The control loop currently runs at `control_hz=50.0` by default.
 - Stepper motors currently require `home_all()` before `set_target()`.
-- TT motors currently use `position_control_mode="approximate"` because encoder
-  feedback is not decided.
-- The PM30225 motor currently uses this intended command family:
-
-```text
-SET_TARGET motor_id angle duration_ms
-HOME motor_id
-STOP
-STATUS
-```
+- Default configs use mock drivers. Hardware configs for `m1` through `m4`
+  should be built with `build_m1_m4_hardware_configs()` after tuning the pin,
+  angle, pulse-width, and stepper constants in `config.py`.
+- Set `TURKISH_ICE_CREAM_MOTOR_PROFILE=hardware` in deployment to make
+  `MotorManager()` use the hardware config. The default profile is `mock` so
+  local tests run without Raspberry Pi hardware.
 
 ## How To Add Hardware Support
 
@@ -136,22 +130,11 @@ Stepper work:
 - Implement real homing: slow seek toward limit switch, debounce, optional
   backoff, then assign `home_angle`.
 
-TT motor work:
+Servo work:
 
-- Decide whether each TT motor has encoder feedback.
-- If feedback exists, add the smallest feedback abstraction needed and update
-  `TTController` in `controllers/tt.py`.
-- If no feedback exists, keep `MotorState.approximate=True` and make the
-  approximation explicit in config/tests/docs.
-- Implement actual PWM/direction/brake behavior in `drivers/tt.py`.
-
-PM30225 motor work:
-
-- Implement `PM30225SerialDriver` in `drivers/pm30225.py`.
-- Prefer newline-delimited commands unless the PM30225 spec says otherwise.
-- Add acknowledgement/timeout handling if the PM30225 supports it.
-- Keep PM30225 protocol formatting inside the PM30225 driver/controller, not
-  in `MotorManager`.
+- Tune `SERVO_DEFAULTS` and `HARDWARE_SERVO_OPTIONS` in `config.py` for MG995
+  pulse width, PWM frequency, GPIO mode, and signal pins.
+- Keep MG995 duty-cycle conversion in `drivers/servo.py`.
 
 ## Testing Requirements
 
@@ -170,8 +153,7 @@ Add or update tests when changing:
 - concurrent `set_target()` / `get_state()` behavior while the worker is running
 - homing readiness behavior
 - angle-to-step conversion
-- approximate vs closed-loop TT behavior
-- serial command formatting
+- MG995 duty-cycle conversion
 - emergency stop behavior
 
 Hardware tests should be opt-in and clearly separated from normal unit tests.
@@ -200,7 +182,6 @@ Do not make the default test command require Raspberry Pi hardware.
 - Do not move controller execution back into `set_target()`.
 - Do not make controller updates long-running/blocking. They should be short
   per-tick updates so high-frequency retargeting remains responsive.
-- Do not hide that TT angle control is approximate without feedback.
 - Do not mix mock behavior into real hardware drivers.
 - Do not make `home_all()` optional for motors configured with
   `requires_homing=True`.
