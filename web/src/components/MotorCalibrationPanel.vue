@@ -3,14 +3,25 @@
     <template #header>
       <div class="panel-header">
         <span>Motor Calibration</span>
-        <el-button
-          size="small"
-          :disabled="emergencyStopped"
-          :loading="busy === 'zero-all'"
-          @click="$emit('zero-motor')"
-        >
-          Set All To 0
-        </el-button>
+        <div class="panel-actions">
+          <el-button
+            size="small"
+            type="primary"
+            :disabled="emergencyStopped || motors.length === 0"
+            :loading="busy === 'move-motors'"
+            @click="emitAllTargets"
+          >
+            Move All
+          </el-button>
+          <el-button
+            size="small"
+            :disabled="emergencyStopped"
+            :loading="busy === 'zero-all'"
+            @click="$emit('zero-motor')"
+          >
+            Set All To 0
+          </el-button>
+        </div>
       </div>
     </template>
 
@@ -18,7 +29,29 @@
       <div v-for="motor in motors" :key="motor.id" class="motor-row">
         <div class="motor-meta">
           <strong>{{ motor.id }}</strong>
-          <span>{{ formatAngle(motor.current_angle) }} deg</span>
+          <span>Current {{ formatAngle(motor.current_angle) }} deg</span>
+          <span>Target {{ formatAngle(motor.target_angle) }} deg</span>
+          <span>Range {{ formatAngle(motor.min_angle) }} ~ {{ formatAngle(motor.max_angle) }} deg</span>
+        </div>
+
+        <div class="motor-target">
+          <el-input-number
+            v-model="draftTargets[motor.id]"
+            :min="motor.min_angle"
+            :max="motor.max_angle"
+            :step="1"
+            :precision="1"
+            :disabled="emergencyStopped || busy === 'move-motors'"
+            controls-position="right"
+          />
+          <el-button
+            type="primary"
+            :disabled="emergencyStopped"
+            :loading="busy === 'move-motors'"
+            @click="emitSingleTarget(motor.id)"
+          >
+            Move
+          </el-button>
         </div>
 
         <div class="motor-controls">
@@ -51,7 +84,9 @@
 </template>
 
 <script setup>
-defineProps({
+import { reactive, watch } from 'vue'
+
+const props = defineProps({
   motors: {
     type: Array,
     required: true,
@@ -66,7 +101,38 @@ defineProps({
   },
 })
 
-defineEmits(['jog-motor', 'zero-motor'])
+const emit = defineEmits(['move-motors', 'jog-motor', 'zero-motor'])
+
+const draftTargets = reactive({})
+
+watch(
+  () => props.motors,
+  (motors) => {
+    for (const key of Object.keys(draftTargets)) {
+      if (!motors.some((motor) => motor.id === key)) {
+        delete draftTargets[key]
+      }
+    }
+
+    for (const motor of motors) {
+      draftTargets[motor.id] = Number(
+        draftTargets[motor.id] ?? motor.target_angle ?? motor.current_angle ?? 0,
+      )
+    }
+  },
+  { immediate: true, deep: true },
+)
+
+const emitSingleTarget = (motorId) => {
+  emit('move-motors', { [motorId]: Number(draftTargets[motorId] ?? 0) })
+}
+
+const emitAllTargets = () => {
+  const targets = Object.fromEntries(
+    props.motors.map((motor) => [motor.id, Number(draftTargets[motor.id] ?? 0)]),
+  )
+  emit('move-motors', targets)
+}
 
 const formatAngle = (value) => Number(value || 0).toFixed(1)
 </script>
@@ -85,6 +151,11 @@ const formatAngle = (value) => Number(value || 0).toFixed(1)
   font-weight: 700;
 }
 
+.panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .motor-list {
   display: grid;
   gap: 10px;
@@ -92,7 +163,7 @@ const formatAngle = (value) => Number(value || 0).toFixed(1)
 
 .motor-row {
   display: grid;
-  grid-template-columns: minmax(120px, 0.8fr) minmax(240px, 1.6fr);
+  grid-template-columns: minmax(120px, 0.8fr) minmax(220px, 1.1fr) minmax(240px, 1.6fr);
   gap: 12px;
   align-items: center;
   padding: 12px;
@@ -117,6 +188,17 @@ const formatAngle = (value) => Number(value || 0).toFixed(1)
   font-size: 13px;
 }
 
+.motor-target {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.motor-target :deep(.el-input-number) {
+  width: 100%;
+}
+
 .motor-controls {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -137,6 +219,11 @@ const formatAngle = (value) => Number(value || 0).toFixed(1)
   }
 
   .panel-header {
+    display: grid;
+  }
+
+  .panel-actions,
+  .motor-target {
     display: grid;
   }
 

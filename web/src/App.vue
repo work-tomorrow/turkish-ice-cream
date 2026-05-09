@@ -32,6 +32,7 @@
           :motors="motors"
           :emergency-stopped="status.system.emergency_stopped"
           :busy="busy"
+          @move-motors="moveMotors"
           @jog-motor="jogMotor"
           @zero-motor="zeroMotor"
         />
@@ -213,6 +214,12 @@ const jogMotor = ({ motorId, direction }) =>
       direction,
       step_degrees: 3,
     })
+  })
+
+const moveMotors = (targets) =>
+  withBusy('move-motors', async () => {
+    await axios.post('/motors/targets', { targets })
+    ElMessage.success('Motor targets updated')
   })
 
 const zeroMotor = (motorId) =>

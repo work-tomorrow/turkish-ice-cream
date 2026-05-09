@@ -82,9 +82,25 @@ class MotorJogResponse(BaseModel):
 class MotorStatus(BaseModel):
     id: str
     current_angle: float
+    target_angle: float
     min_angle: float
     max_angle: float
     step_degrees: float = 3.0
+
+
+class MotorTargetRequest(BaseModel):
+    targets: dict[str, float] = Field(
+        ...,
+        min_length=1,
+        description="Requested logical target angle for one or more motors.",
+    )
+
+
+class MotorTargetResponse(BaseModel):
+    ok: bool
+    target_motor_ids: list[str]
+    motors: list[MotorStatus]
+    robot_state: RobotState
 
 
 class MotorZeroResponse(BaseModel):

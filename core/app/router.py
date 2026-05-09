@@ -8,27 +8,29 @@ from core.app.models import (
     EmergencyStopClearResponse,
     EmergencyStopSetResponse,
     MessageResponse,
-    PingResponse,
-    MotorsResponse,
+    MotorDirection,
+    MotorJogRequest,
+    MotorJogResponse,
+    MotorJogResult,
     MotorStatus,
+    MotorTargetRequest,
+    MotorTargetResponse,
+    MotorZeroResponse,
+    MotorsResponse,
+    PingResponse,
+    RobotState,
+    SessionActiveResponse,
     SessionCreateRequest,
     SessionCreateResponse,
-    SessionActiveResponse,
     SessionDeleteResponse,
     SessionPatchRequest,
     SessionPatchResponse,
     SessionResponse,
     SessionSummary,
-    StatusRobot,
     StatusResponse,
+    StatusRobot,
     StatusSystem,
     StatusVision,
-    MotorDirection,
-    MotorJogRequest,
-    MotorJogResponse,
-    MotorJogResult,
-    MotorZeroResponse,
-    RobotState,
 )
 
 api_router = APIRouter()
@@ -80,8 +82,8 @@ def _ensure_not_emergency_stopped(request: Request) -> None:
     return
 
 
-def _ensure_motor_id(motor_id: str) -> None:
-    if motor_id not in {"m1", "m2", "m3", "m4"}:
+def _ensure_motor_id(request: Request, motor_id: str) -> None:
+    if motor_id not in request.app.state.motor_manager.motor_ids:
         raise HTTPException(status_code=400, detail=f"Unknown motor id: {motor_id}")
 
 
@@ -108,6 +110,7 @@ def _motor_payload(request: Request) -> list[MotorStatus]:
         MotorStatus(
             id=motor_id,
             current_angle=float(motor_state["current_angle"]),
+            target_angle=float(motor_state["target_angle"]),
             min_angle=float(motor_state["min_angle"]),
             max_angle=float(motor_state["max_angle"]),
             step_degrees=DEFAULT_STEP_DEGREES,
@@ -213,7 +216,7 @@ async def jog_motor(
 ) -> MotorJogResponse:
     """Move one motor by a small relative angle for initial calibration."""
     _ensure_not_emergency_stopped(request)
-    _ensure_motor_id(motor_id)
+    _ensure_motor_id(request, motor_id)
     _ensure_motor_manager_ready(request)
 
     delta_degrees = req.step_degrees
@@ -258,6 +261,52 @@ async def jog_motor(
     )
 
 
+@api_router.post("/motors/targets", response_model=MotorTargetResponse, tags=["motors"])
+async def set_motor_targets(
+    req: MotorTargetRequest,
+    request: Request,
+) -> MotorTargetResponse:
+    """Update logical target angles for one or more motors."""
+    _ensure_not_emergency_stopped(request)
+    _ensure_motor_manager_ready(request)
+
+    manager_state = request.app.state.motor_manager.get_state()
+    targets = {
+        current_motor_id: float(current_motor_state["target_angle"])
+        for current_motor_id, current_motor_state in manager_state["motors"].items()
+    }
+
+    for motor_id, angle in req.targets.items():
+        _ensure_motor_id(request, motor_id)
+        motor_state = manager_state["motors"][motor_id]
+        min_angle = float(motor_state["min_angle"])
+        max_angle = float(motor_state["max_angle"])
+        next_angle = float(angle)
+        if next_angle < min_angle or next_angle > max_angle:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Motor {motor_id} angle {next_angle} outside "
+                    f"[{min_angle}, {max_angle}]"
+                ),
+            )
+        targets[motor_id] = next_angle
+
+    try:
+        request.app.state.motor_manager.set_target(targets)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return MotorTargetResponse(
+        ok=True,
+        target_motor_ids=sorted(req.targets.keys()),
+        motors=_motor_payload(request),
+        robot_state=request.app.state.robot_state,
+    )
+
+
 @api_router.post("/motors/zero", response_model=MotorZeroResponse, tags=["motors"])
 async def zero_all_motors(request: Request) -> MotorZeroResponse:
     """Save the current motor positions as the absolute zero calibration."""
@@ -289,7 +338,7 @@ async def zero_motor(
 ) -> MotorZeroResponse:
     """Save one motor's current position as the absolute zero calibration."""
     _ensure_not_emergency_stopped(request)
-    _ensure_motor_id(motor_id)
+    _ensure_motor_id(request, motor_id)
     _ensure_motor_manager_ready(request)
 
     try:
