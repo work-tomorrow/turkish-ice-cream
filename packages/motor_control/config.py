@@ -44,7 +44,7 @@ def build_hardware_motors() -> dict[str, StepperMotor | ServoMotor]:
             "m1", step_pin=20, dir_pin=16, enable_pin=21, min_angle=-45, max_angle=45
         ),  # 轉盤變大
         "m2": ServoMotor(
-            "m2", pin=18, max_angle=145, min_angle=25, home_angle=65
+            "m2", pin=18, max_angle=105, min_angle=-5, home_angle=25
         ),  # 下變大
         "m3": ServoMotor(
             "m3", pin=23, max_angle=150, min_angle=30, home_angle=90

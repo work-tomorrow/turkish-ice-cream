@@ -9,6 +9,9 @@ The controller keeps robot X unchanged and only asks this module for the next YZ
 import math
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TypeAlias
+
+ImagePointPx: TypeAlias = tuple[float, float]
 
 
 class EscapeState(Enum):
@@ -99,9 +102,21 @@ class LabEscapeConfig:
     origin_to_left_boundary_cm: float = 25.0
     origin_to_top_boundary_cm: float = 25.0
 
-    # Camera mapping. 800px over a 50cm workspace keeps the old demo frame size
-    # while matching the robot workspace below.
+    # Camera mapping. Calibrate these four image points to the physical
+    # workspace corners, in this order:
+    # top-left, top-right, bottom-right, bottom-left.
     pixels_per_cm: float = 16.0
+    image_workspace_points_px: tuple[
+        ImagePointPx,
+        ImagePointPx,
+        ImagePointPx,
+        ImagePointPx,
+    ] = (
+        (0.0, 0.0),
+        (800.0, 0.0),
+        (800.0, 800.0),
+        (0.0, 800.0),
+    )
     min_hand_confidence: float = 0.2
 
     # Max physical YZ displacement per core control update.

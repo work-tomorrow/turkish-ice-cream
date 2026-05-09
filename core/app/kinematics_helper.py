@@ -126,7 +126,7 @@ class ArmIKConfig:
             "J1": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
             # J2 實體方向反了；目前依你提供的檔案保留 motor J2 min=-30。
             # 若硬體實測是 -40，改成 min_deg=-40.0 即可。
-            "J2": JointLimit(min_deg=-30.0, max_deg=180.0, sign=-1.0, zero_deg=0.0),
+            "J2": JointLimit(min_deg=-30.0, max_deg=90.0, sign=-1.0, zero_deg=0.0),
             "J3": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
             "J4": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
         }

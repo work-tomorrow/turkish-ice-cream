@@ -3,9 +3,11 @@ from dataclasses import dataclass
 import logging
 import math
 
+import numpy as np
+
 from core.app.config import settings
 from core.app.escape_controller import EscapeController, XYZPosition, YZPosition
-from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit, clamp
+from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit
 from core.app.lab_escape.common import LabEscapeConfig
 from core.app.models import Hand, RobotState
 
@@ -36,39 +38,8 @@ VANISH_PHASE_LANDING = "landing"
 
 
 @dataclass(frozen=True)
-class AffineAxisCalibration:
-    scale: float
-    offset: float
-    min_value: float
-    max_value: float
-
-    @classmethod
-    def from_points(
-        cls,
-        *,
-        input_min: float,
-        input_max: float,
-        output_min: float,
-        output_max: float,
-    ) -> "AffineAxisCalibration":
-        scale = (output_max - output_min) / (input_max - input_min)
-        offset = output_min - input_min * scale
-        return cls(
-            scale=scale,
-            offset=offset,
-            min_value=min(output_min, output_max),
-            max_value=max(output_min, output_max),
-        )
-
-    def apply(self, value: float) -> float:
-        calibrated = float(value) * self.scale + self.offset
-        return clamp(calibrated, self.min_value, self.max_value)
-
-
-@dataclass(frozen=True)
 class CameraCalibrationConfig:
-    y_from_pixel_x: AffineAxisCalibration
-    z_from_pixel_y: AffineAxisCalibration
+    image_to_robot_yz: np.ndarray
     min_hand_confidence: float = 0.2
 
     @classmethod
@@ -76,21 +47,61 @@ class CameraCalibrationConfig:
         cls,
         config: LabEscapeConfig,
     ) -> "CameraCalibrationConfig":
+        robot_workspace_points = (
+            (config.target_y_min_cm, config.target_z_max_cm),
+            (config.target_y_max_cm, config.target_z_max_cm),
+            (config.target_y_max_cm, config.target_z_min_cm),
+            (config.target_y_min_cm, config.target_z_min_cm),
+        )
         return cls(
-            y_from_pixel_x=AffineAxisCalibration.from_points(
-                input_min=0.0,
-                input_max=config.vision_width_px,
-                output_min=config.target_y_min_cm,
-                output_max=config.target_y_max_cm,
-            ),
-            z_from_pixel_y=AffineAxisCalibration.from_points(
-                input_min=0.0,
-                input_max=config.vision_height_px,
-                output_min=config.target_z_max_cm,
-                output_max=config.target_z_min_cm,
+            image_to_robot_yz=_homography_from_points(
+                config.image_workspace_points_px,
+                robot_workspace_points,
             ),
             min_hand_confidence=config.min_hand_confidence,
         )
+
+    def apply(self, x_px: float, y_px: float) -> YZPosition:
+        point = np.array([float(x_px), float(y_px), 1.0], dtype=float)
+        mapped = self.image_to_robot_yz @ point
+        scale = mapped[2]
+        if abs(scale) < 1e-9:
+            raise ValueError("Camera calibration produced an invalid point scale")
+
+        return YZPosition(
+            y_cm=float(mapped[0] / scale),
+            z_cm=float(mapped[1] / scale),
+        )
+
+
+def _homography_from_points(
+    image_points: tuple[tuple[float, float], ...],
+    robot_points: tuple[tuple[float, float], ...],
+) -> np.ndarray:
+    if len(image_points) != 4 or len(robot_points) != 4:
+        raise ValueError("Camera calibration needs exactly four image and robot points")
+
+    rows = []
+    values = []
+    for (x, y), (target_y, target_z) in zip(image_points, robot_points):
+        rows.append([x, y, 1.0, 0.0, 0.0, 0.0, -target_y * x, -target_y * y])
+        values.append(target_y)
+        rows.append([0.0, 0.0, 0.0, x, y, 1.0, -target_z * x, -target_z * y])
+        values.append(target_z)
+
+    solved = np.linalg.solve(
+        np.array(rows, dtype=float),
+        np.array(values, dtype=float),
+    )
+    h11, h12, h13, h21, h22, h23, h31, h32 = solved
+    return np.array(
+        [
+            [h11, h12, h13],
+            [h21, h22, h23],
+            [h31, h32, 1.0],
+        ],
+        dtype=float,
+    )
 
 
 @dataclass
@@ -468,10 +479,7 @@ class RobotController:
         ):
             return None
 
-        return YZPosition(
-            y_cm=self.camera_calibration.y_from_pixel_x.apply(float(hand.x)),
-            z_cm=self.camera_calibration.z_from_pixel_y.apply(float(hand.y)),
-        )
+        return self.camera_calibration.apply(float(hand.x), float(hand.y))
 
     def _sync_ik_limits(self, motor_state: dict) -> None:
         motors = motor_state.get("motors", {})
