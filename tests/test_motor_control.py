@@ -9,9 +9,9 @@ class MotorManagerTest(unittest.TestCase):
         self.manager = MotorManager(
             motors=build_mock_motors(),
             dt_s=0.1,
-            max_speed_deg_s={
+            max_velocity_deg_s={
                 "m1": 45.0,
-                "m2": 45.0,
+                "m2": 180.0,
                 "m3": 180.0,
                 "m4": 180.0,
             },
@@ -25,7 +25,7 @@ class MotorManagerTest(unittest.TestCase):
 
         self.assertEqual(set(state["motors"]), {"m1", "m2", "m3", "m4"})
         self.assertEqual(state["motors"]["m1"]["kind"], MotorKind.STEPPER)
-        self.assertEqual(state["motors"]["m2"]["kind"], MotorKind.STEPPER)
+        self.assertEqual(state["motors"]["m2"]["kind"], MotorKind.SERVO)
         self.assertEqual(state["motors"]["m3"]["kind"], MotorKind.SERVO)
         self.assertEqual(state["motors"]["m4"]["kind"], MotorKind.SERVO)
 
@@ -46,7 +46,7 @@ class MotorManagerTest(unittest.TestCase):
 
         state = self.manager.get_state()
         self.assertEqual(state["motors"]["m1"]["current_angle"], 4.5)
-        self.assertEqual(state["motors"]["m2"]["current_angle"], -4.5)
+        self.assertEqual(state["motors"]["m2"]["current_angle"], 72.0)
         self.assertEqual(state["motors"]["m3"]["current_angle"], 108.0)
         self.assertEqual(state["motors"]["m4"]["current_angle"], 72.0)
 
@@ -57,7 +57,7 @@ class MotorManagerTest(unittest.TestCase):
 
         state = self.manager.get_state()
         self.assertEqual(state["motors"]["m1"]["current_angle"], 4.5)
-        self.assertEqual(state["motors"]["m2"]["current_angle"], -4.5)
+        self.assertEqual(state["motors"]["m2"]["current_angle"], 72.0)
         self.assertEqual(state["motors"]["m3"]["current_angle"], 108.0)
         self.assertEqual(state["motors"]["m4"]["current_angle"], 72.0)
 
@@ -71,7 +71,7 @@ class MotorManagerTest(unittest.TestCase):
         state = self.manager.get_state()
 
         self.assertEqual(state["motors"]["m1"]["target_angle"], 0.0)
-        self.assertEqual(state["motors"]["m2"]["target_angle"], 0.0)
+        self.assertEqual(state["motors"]["m2"]["target_angle"], 90.0)
         self.assertEqual(state["motors"]["m3"]["target_angle"], -18.0)
         self.assertEqual(state["motors"]["m4"]["target_angle"], 90.0)
 

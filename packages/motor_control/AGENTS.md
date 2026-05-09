@@ -20,8 +20,8 @@ manager.set_target(targets, duration_ms)
 
 The current robot has 4 motors:
 
-- 2 stepper motors: `m1`, `m2`
-- 2 MG995 servo motors: `m3`, `m4`
+- 1 stepper motor: `m1`
+- 3 MG995 servo motors: `m2`, `m3`, `m4`
 
 Upper layers should not need to know which motor is stepper or servo
 controlled.

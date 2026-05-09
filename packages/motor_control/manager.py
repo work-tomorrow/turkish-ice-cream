@@ -38,7 +38,7 @@ class MotorManager:
         motors: dict[str, Any] | None = None,
         *,
         dt_s: float = 0.1,
-        max_speed_deg_s: dict[str, float] | None = None,
+        max_velocity_deg_s: dict[str, float] | None = None,
     ) -> None:
         if dt_s <= 0:
             raise ValueError("dt_s must be positive")
@@ -51,15 +51,15 @@ class MotorManager:
 
         # Default speed limits.
         # You can tune these later based on the real robot.
-        self.max_speed_deg_s = {
+        self.max_velocity_deg_s = {
             "m1": 45.0,
-            "m2": 45.0,
+            "m2": 180.0,
             "m3": 180.0,
             "m4": 180.0,
         }
 
-        if max_speed_deg_s is not None:
-            self.max_speed_deg_s.update(max_speed_deg_s)
+        if max_velocity_deg_s is not None:
+            self.max_velocity_deg_s.update(max_velocity_deg_s)
 
         # Manager-side target memory.
         # This is the value after clamp + speed limit.
@@ -106,8 +106,8 @@ class MotorManager:
 
             # 2. Speed limit.
             current = self.current_targets[motor_id]
-            max_speed = float(self.max_speed_deg_s.get(motor_id, 180.0))
-            max_delta = max_speed * self.dt_s
+            max_velocity = float(self.max_velocity_deg_s.get(motor_id, 180.0))
+            max_delta = max_velocity * self.dt_s
 
             delta = target - current
 
@@ -189,8 +189,12 @@ class MotorManager:
 
         for current_motor_id in motor_ids:
             motor = self.motors[current_motor_id]
-            physical_current = float(getattr(motor, "current_angle", 0.0))
-            self.zero_offsets[current_motor_id] += physical_current
+            if hasattr(motor, "set_current_angle_zero"):
+                motor.set_current_angle_zero()
+                self.zero_offsets[current_motor_id] = 0.0
+            else:
+                physical_current = float(getattr(motor, "current_angle", 0.0))
+                self.zero_offsets[current_motor_id] += physical_current
             self.current_targets[current_motor_id] = 0.0
 
     def cleanup(self) -> None:

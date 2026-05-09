@@ -42,7 +42,7 @@ class MockMotor:
 def build_mock_motors() -> dict[str, MockMotor]:
     return {
         "m1": MockMotor("m1", MotorKind.STEPPER, -180.0, 180.0),
-        "m2": MockMotor("m2", MotorKind.STEPPER, -180.0, 180.0),
+        "m2": MockMotor("m2", MotorKind.SERVO, 0.0, 180.0, 90.0),
         "m3": MockMotor("m3", MotorKind.SERVO, 0.0, 180.0, 90.0),
         "m4": MockMotor("m4", MotorKind.SERVO, 0.0, 180.0, 90.0),
     }
