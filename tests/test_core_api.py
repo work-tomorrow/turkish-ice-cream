@@ -29,6 +29,7 @@ class CoreApiMotorTest(unittest.TestCase):
 
         self.assertNotIn("hand_tracking", main_source)
         self.assertNotIn("_vision_loop", main_source)
+        self.assertNotIn("build_mock_motors", main_source)
         self.assertIn("vision_stale_monitor", main_source)
 
         route_paths = {route.path for route in app.routes}
@@ -48,6 +49,7 @@ class CoreApiMotorTest(unittest.TestCase):
         self.assertNotIn("/actions", paths)
         self.assertNotIn("/actions/zero", paths)
         self.assertNotIn("/emergency-stop", paths)
+        self.assertNotIn("/vision/frame", paths)
 
         schemas = schema["components"]["schemas"]
         self.assertIn("MotorsResponse", schemas)
@@ -69,6 +71,7 @@ class CoreApiMotorTest(unittest.TestCase):
         self.assertNotIn("EmergencyStopClearResponse", schemas)
         self.assertNotIn("SessionPatchRequest", schemas)
         self.assertNotIn("SessionPatchResponse", schemas)
+        self.assertNotIn("SessionCreateRequest", schemas)
 
     def test_status_response_is_structured_without_session_counters(self) -> None:
         schema = app.openapi()
@@ -248,8 +251,6 @@ class _request_context:
         state = SimpleNamespace(
             running=False,
             robot_state=RobotState.idle,
-            tease_count=0,
-            max_tease=10,
             hand=Hand(),
             vision_ready=True,
             last_hand_result_at=None,

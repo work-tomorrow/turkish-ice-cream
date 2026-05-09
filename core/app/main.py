@@ -9,26 +9,16 @@ from core.app.models import Hand, RobotState
 from core.app.router import api_router
 from core.app.vision_state import vision_stale_monitor
 from motor_control import MotorManager
-from motor_control.mock_motors import build_mock_motors
-
-
-def _create_motor_manager() -> MotorManager:
-    try:
-        return MotorManager()
-    except RuntimeError:
-        return MotorManager(motors=build_mock_motors())
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.running = False
     app.state.robot_state = RobotState.idle
-    app.state.tease_count = 0
-    app.state.max_tease = 10
     app.state.hand = Hand()
     app.state.vision_ready = False
     app.state.last_hand_result_at = None
-    app.state.motor_manager = _create_motor_manager()
+    app.state.motor_manager = MotorManager()
     app.state.motor_manager_ready = False
     app.state.vision_stale_task = asyncio.create_task(
         vision_stale_monitor(

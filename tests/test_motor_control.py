@@ -1,6 +1,9 @@
 import unittest
+from unittest.mock import patch
 
-from motor_control import MotorKind, MotorManager
+from motor_control import MotorKind, MotorManager, build_default_motors, get_motor_profile
+from motor_control.config import MOTOR_PROFILE_ENV
+from motor_control.mock_motors import MockMotor
 from motor_control.mock_motors import build_mock_motors
 
 
@@ -28,6 +31,19 @@ class MotorManagerTest(unittest.TestCase):
         self.assertEqual(state["motors"]["m2"]["kind"], MotorKind.SERVO)
         self.assertEqual(state["motors"]["m3"]["kind"], MotorKind.SERVO)
         self.assertEqual(state["motors"]["m4"]["kind"], MotorKind.SERVO)
+
+    def test_default_motor_profile_is_explicit_mock(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(get_motor_profile(), "mock")
+            motors = build_default_motors()
+
+        self.assertEqual(set(motors), {"m1", "m2", "m3", "m4"})
+        self.assertTrue(all(isinstance(motor, MockMotor) for motor in motors.values()))
+
+    def test_rejects_unknown_motor_profile(self) -> None:
+        with patch.dict("os.environ", {MOTOR_PROFILE_ENV: "surprise"}):
+            with self.assertRaises(ValueError):
+                build_default_motors()
 
     def test_rejects_incomplete_targets(self) -> None:
         with self.assertRaises(ValueError):

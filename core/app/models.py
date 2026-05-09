@@ -125,22 +125,14 @@ class MotorZeroResponse(BaseModel):
 class SessionResponse(BaseModel):
     active: bool
     robot_state: RobotState
-    tease_count: int
-    max_tease: int
 
 
 class SessionSummary(BaseModel):
     active: bool
-    max_tease: int
-    tease_count: int
 
 
 class SessionActiveResponse(BaseModel):
     active: bool
-
-
-class SessionCreateRequest(BaseModel):
-    max_tease: int = 3
 
 
 class SessionCreateResponse(BaseModel):

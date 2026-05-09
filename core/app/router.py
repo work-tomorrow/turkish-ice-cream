@@ -1,6 +1,6 @@
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Request, Response, WebSocket
+from fastapi import APIRouter, HTTPException, Request, WebSocket
 from fastapi import WebSocketDisconnect
 from pydantic import ValidationError
 
@@ -19,7 +19,6 @@ from core.app.models import (
     PingResponse,
     RobotState,
     SessionActiveResponse,
-    SessionCreateRequest,
     SessionCreateResponse,
     SessionDeleteResponse,
     SessionResponse,
@@ -51,16 +50,12 @@ def _session_payload(request: Request) -> SessionResponse:
     return SessionResponse(
         active=request.app.state.running,
         robot_state=request.app.state.robot_state,
-        tease_count=request.app.state.tease_count,
-        max_tease=request.app.state.max_tease,
     )
 
 
 def _session_summary(request: Request) -> SessionSummary:
     return SessionSummary(
         active=request.app.state.running,
-        max_tease=request.app.state.max_tease,
-        tease_count=request.app.state.tease_count,
     )
 
 
@@ -126,7 +121,6 @@ async def get_status(request: Request) -> StatusResponse:
     tags=["session"],
 )
 async def create_session(
-    req: SessionCreateRequest,
     request: Request,
 ) -> SessionCreateResponse:
     """Create or return the single active demo session."""
@@ -138,8 +132,6 @@ async def create_session(
         )
 
     request.app.state.running = True
-    request.app.state.max_tease = req.max_tease
-    request.app.state.tease_count = 0
     request.app.state.robot_state = RobotState.started
     return SessionCreateResponse(ok=True, session=_session_summary(request))
 
@@ -316,15 +308,6 @@ async def zero_motor(
 async def get_session(request: Request) -> SessionResponse:
     """Return the current single demo session state."""
     return _session_payload(request)
-
-
-@api_router.get("/vision/frame", tags=["vision"])
-async def get_vision_frame(request: Request) -> Response:
-    """Vision preview moved to the desktop vision service."""
-    raise HTTPException(
-        status_code=410,
-        detail="Vision preview is served by the desktop vision service.",
-    )
 
 
 @api_router.websocket("/ws/hand-ingest")

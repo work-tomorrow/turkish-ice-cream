@@ -1,4 +1,11 @@
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict
+
+CORE_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
+load_dotenv(CORE_ENV_FILE)
 
 
 class Settings(BaseModel):
@@ -16,7 +23,9 @@ class Settings(BaseModel):
     )
     version: str = "0.1.0"
     api_v1_prefix: str = "/api/v1"
-    vision_stale_timeout_seconds: float = 1.0
+    vision_stale_timeout_seconds: float = float(
+        os.getenv("VISION_STALE_TIMEOUT_SECONDS", "1.0")
+    )
     cors_allow_origin_regex: str = (
         r"^https?://("
         r"localhost|"

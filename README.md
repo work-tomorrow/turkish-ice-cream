@@ -98,6 +98,7 @@ vision service over `ws://<rpi-ip>:8000/ws/hand-ingest`.
 
 ```sh
 eval "$(poetry env activate)"
+cp core/.env.example core/.env
 poetry run python -m core
 ```
 
@@ -139,6 +140,22 @@ The desktop service listens on `http://localhost:8010` by default and exposes:
 For the demo web, copy `web/.env.example` to `web/.env`. Keep
 `VITE_API_BASE_URL` pointed at the RPI core API and set
 `VITE_VISION_API_BASE_URL` to the desktop vision service for the camera preview.
+
+The core service no longer serves `/vision/frame`; camera preview routes live in
+the desktop vision service.
+
+### Motor Runtime Profile
+
+The core service reads `core/.env`. Use `TURKISH_ICE_CREAM_MOTOR_PROFILE` there
+to choose its motor runtime. The default is `mock`, so local development never
+touches Raspberry Pi GPIO by accident. Set it to `hardware` on the RPI deployment:
+
+```env
+TURKISH_ICE_CREAM_MOTOR_PROFILE=hardware
+```
+
+Invalid profile values fail at startup. Hardware startup errors also fail directly
+instead of silently falling back to mock motors.
 
 ### Motors API
 
@@ -186,7 +203,7 @@ desktop vision service:
 }
 ```
 
-`robot.state` is one of `idle`, `started`, `stopping`, or `error`. Session counters such as `tease_count` and `max_tease` stay under `/session`. `DELETE /session` is the single stop command: it stops the current interaction and immediately stops all motors.
+`robot.state` is one of `idle`, `started`, `stopping`, or `error`. `DELETE /session` is the single stop command: it stops the current interaction and immediately stops all motors.
 
 ### Other Commands
 
