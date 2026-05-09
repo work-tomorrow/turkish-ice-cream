@@ -79,6 +79,8 @@ class RobotControllerTest(unittest.TestCase):
     def test_affine_calibration_maps_pixels_to_robot_yz_workspace(self) -> None:
         controller = RobotController(SimpleNamespace())
         config = controller.escape_controller.config
+        self.assertEqual(config.vision_width_px, 800.0)
+        self.assertEqual(config.vision_height_px, 800.0)
 
         top_left = controller._calibrate_hand_yz(
             Hand(detected=True, x=0.0, y=0.0, confidence=1.0)
@@ -96,10 +98,10 @@ class RobotControllerTest(unittest.TestCase):
         self.assertIsNotNone(bottom_right)
         assert top_left is not None
         assert bottom_right is not None
-        self.assertEqual(top_left.y_cm, -40.0)
-        self.assertEqual(top_left.z_cm, 40.0)
-        self.assertEqual(bottom_right.y_cm, 40.0)
-        self.assertEqual(bottom_right.z_cm, -40.0)
+        self.assertEqual(top_left.y_cm, -12.5)
+        self.assertEqual(top_left.z_cm, 12.5)
+        self.assertEqual(bottom_right.y_cm, 12.5)
+        self.assertEqual(bottom_right.z_cm, -12.5)
 
     def test_motion_cycles_use_angle_delta_velocity_and_dt(self) -> None:
         self.assertEqual(
@@ -292,8 +294,8 @@ class RobotControllerTest(unittest.TestCase):
     def test_kosu_vanish_result_exposes_planned_landing(self) -> None:
         algo = TurkishBoundaryVanishLandingAlgo(vanish_time=0.25)
         config = WorldConfig()
-        ice_pos = Vec2(400.0, 400.0)
-        hand_pos = Vec2(400.0, 390.0)
+        ice_pos = Vec2(0.0, 0.0)
+        hand_pos = Vec2(0.5, 0.0)
 
         algo.on_enter(ice_pos, hand_pos, None, config)
         result = algo.update(

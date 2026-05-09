@@ -7,9 +7,10 @@ from enum import Enum, auto
 from core.app.lab_escape.common import (
     Vec2,
     WorldConfig,
-    clamp_position,
+    clamp_position_with_config,
     distance,
-    distance_from_nearest_wall,
+    distance_from_nearest_wall_with_config,
+    workspace_center,
 )
 
 
@@ -140,11 +141,10 @@ def run_eight_direction_motion(
         raise ValueError(f"Unknown EightDirMode: {mode}")
 
     next_pos = current_pos + chosen_dir * step
-    next_pos = clamp_position(
+    next_pos = clamp_position_with_config(
         next_pos,
-        config.ice_radius,
-        config.width,
-        config.height,
+        config.ice_radius_cm,
+        config,
     )
 
     return EightDirCommand(
@@ -165,8 +165,12 @@ def _is_valid_direction(
     require_farther_from_danger: bool,
 ) -> bool:
     inside_window = (
-        config.ice_radius <= candidate.x <= config.width - config.ice_radius
-        and config.ice_radius <= candidate.y <= config.height - config.ice_radius
+        config.y_min_cm + config.ice_radius_cm
+        <= candidate.x
+        <= config.y_max_cm - config.ice_radius_cm
+        and config.z_min_cm + config.ice_radius_cm
+        <= candidate.y
+        <= config.z_max_cm - config.ice_radius_cm
     )
 
     if not inside_window:
@@ -179,9 +183,9 @@ def _is_valid_direction(
     candidate_dist = distance(candidate, danger_pos)
 
     min_safe_distance = (
-        config.hand_radius
-        + config.ice_radius
-        + config.min_safe_distance_extra
+        config.hand_radius_cm
+        + config.ice_radius_cm
+        + config.min_safe_distance_extra_cm
     )
 
     if candidate_dist < min_safe_distance:
@@ -215,11 +219,11 @@ def _choose_weighted_escape_direction(
         candidate_dist = distance(candidate, danger_pos)
         direction_alignment = direction.dot(away_from_danger)
         wall_penalty = _wall_penalty(candidate, config)
-        noise = random.uniform(-5.0, 5.0)
+        noise = random.uniform(-0.5, 0.5)
 
         score = 0.0
         score += candidate_dist * 1.0
-        score += direction_alignment * 90.0
+        score += direction_alignment * 9.0
         score -= wall_penalty * 1.5
         score += noise
 
@@ -241,7 +245,7 @@ def _choose_boundary_aware_direction(
     best_dir = directions[0]
     best_score = -float("inf")
 
-    center = Vec2(config.width / 2, config.height / 2)
+    center = workspace_center(config)
     toward_center = (center - current_pos).normalized()
 
     away_from_danger = None
@@ -252,25 +256,24 @@ def _choose_boundary_aware_direction(
         candidate = current_pos + direction * step
 
         center_alignment = direction.dot(toward_center)
-        wall_distance = distance_from_nearest_wall(
+        wall_distance = distance_from_nearest_wall_with_config(
             candidate,
-            config.ice_radius,
-            config.width,
-            config.height,
+            config.ice_radius_cm,
+            config,
         )
 
         score = 0.0
-        score += center_alignment * 180.0
+        score += center_alignment * 18.0
         score += wall_distance * 1.8
 
         if danger_pos is not None and away_from_danger is not None:
             candidate_dist = distance(candidate, danger_pos)
             escape_alignment = direction.dot(away_from_danger)
 
-            score += escape_alignment * 70.0
+            score += escape_alignment * 7.0
             score += candidate_dist * 0.4
 
-        score += random.uniform(-5.0, 5.0)
+        score += random.uniform(-0.5, 0.5)
 
         if score > best_score:
             best_score = score
@@ -303,10 +306,10 @@ def _choose_escape_from_point_direction(
         wall_penalty = _wall_penalty(candidate, config)
 
         score = 0.0
-        score += escape_alignment * 120.0
+        score += escape_alignment * 12.0
         score += candidate_dist * 1.0
         score -= wall_penalty * 1.0
-        score += random.uniform(-5.0, 5.0)
+        score += random.uniform(-0.5, 0.5)
 
         if score > best_score:
             best_score = score
@@ -316,14 +319,13 @@ def _choose_escape_from_point_direction(
 
 
 def _wall_penalty(pos: Vec2, config: WorldConfig) -> float:
-    nearest_wall_distance = distance_from_nearest_wall(
+    nearest_wall_distance = distance_from_nearest_wall_with_config(
         pos,
-        config.ice_radius,
-        config.width,
-        config.height,
+        config.ice_radius_cm,
+        config,
     )
 
-    if nearest_wall_distance >= config.boundary_enter_margin:
+    if nearest_wall_distance >= config.boundary_enter_margin_cm:
         return 0.0
 
-    return config.boundary_enter_margin - nearest_wall_distance
+    return config.boundary_enter_margin_cm - nearest_wall_distance

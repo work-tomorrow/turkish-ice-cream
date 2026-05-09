@@ -1,7 +1,12 @@
 from __future__ import annotations
 
+"""Lab escape geometry in robot YZ centimeters.
+
+Vec2 is always (y_robot_cm, z_robot_cm), matching XYZPosition.y_cm / z_cm.
+"""
+
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 
 
@@ -15,6 +20,8 @@ class RobotState(Enum):
 
 @dataclass
 class Vec2:
+    """Robot Y (left/right) and Z (up/down), both in centimeters."""
+
     x: float
     y: float
 
@@ -42,6 +49,8 @@ class Vec2:
 
 @dataclass
 class Rect:
+    """Axis-aligned rectangle in (y_cm, z_cm). (x, y) is min corner; w, h spans in y and z."""
+
     x: float
     y: float
     w: float
@@ -86,64 +95,63 @@ class StateDecision:
 
 @dataclass
 class WorldConfig:
-    # 80cm x 80cm square workspace, simulated as 10 px/cm.
-    width: int = 800
-    height: int = 800
-    pixels_per_cm: float = 10.0
-    boundary_size_cm: float = 80.0
-    origin_to_left_boundary_cm: float = 40.0
-    origin_to_top_boundary_cm: float = 40.0
+    """Square YZ workspace in centimeters (robot frame)."""
 
-    hand_radius: float = 55
-    ice_radius: float = 22
+    boundary_size_cm: float = 25.0
+    origin_to_left_boundary_cm: float = 12.5
+    origin_to_top_boundary_cm: float = 12.5
 
-    escape_trigger_distance: float = 180
-    close_distance: float = 45
+    hand_radius_cm: float = 5.5
+    ice_radius_cm: float = 2.2
 
-    boundary_enter_margin: float = 90
-    boundary_exit_margin: float = 130
+    escape_trigger_distance_cm: float = 12.0
+    close_distance_cm: float = 4.5
 
-    hand_lost_blind_timeout: float = 0.8
-    blind_zone_detection_margin: float = 70
+    boundary_enter_margin_cm: float = 2.5
+    boundary_exit_margin_cm: float = 4.0
 
-    min_safe_distance_extra: float = 10
+    hand_lost_blind_timeout_s: float = 0.8
+    blind_zone_detection_margin_cm: float = 3.5
 
-    decision_interval: float = 0.1
-    flat_escape_speed: float = 500
-    landing_min_distance: float = 280
-    landing_boundary_margin: float = 280
-    boundary_escape_distance: float = 60
-    boundary_escape_max_target_distance: float = 150
-    idle_exit_distance: float = 200
-    contact_escape_distance: float = 185
-    flat_escape_min_angle_deg: float = 100
-    close_flat_escape_distance: float = 150
-    close_flat_escape_min_angle_deg: float = 120
-    blind_escape_center_distance: float = 280
+    min_safe_distance_extra_cm: float = 1.0
+
+    decision_interval_s: float = 0.1
+    flat_escape_speed_cm_s: float = 50.0
+    landing_min_distance_cm: float = 8.0
+    landing_boundary_margin_cm: float = 3.0
+    boundary_escape_distance_cm: float = 2.0
+    boundary_escape_max_target_distance_cm: float = 12.0
+    idle_exit_distance_cm: float = 15.0
+    contact_escape_distance_cm: float = 9.0
+    flat_escape_min_angle_deg: float = 100.0
+    close_flat_escape_distance_cm: float = 8.0
+    close_flat_escape_min_angle_deg: float = 120.0
+    blind_escape_center_distance_cm: float = 6.0
     direct_approach_alignment: float = 0.95
-    hand_stationary_speed: float = 15
+    hand_stationary_speed_cm_s: float = 1.5
     enable_close_retreat: bool = False
 
     blind_zone: Rect | None = None
 
-    def __post_init__(self):
-        size = int(self.boundary_size_cm * self.pixels_per_cm)
-        self.width = size
-        self.height = size
-
+    def __post_init__(self) -> None:
         if self.blind_zone is None:
-            self.blind_zone = Rect(
-                self.width / 2 - 60,
-                self.height / 2 - 90,
-                120,
-                180,
-            )
+            self.blind_zone = Rect(-3.75, -5.625, 7.5, 11.25)
 
-    def origin(self) -> Vec2:
-        return Vec2(
-            self.origin_to_left_boundary_cm * self.pixels_per_cm,
-            self.origin_to_top_boundary_cm * self.pixels_per_cm,
-        )
+    @property
+    def y_min_cm(self) -> float:
+        return -self.origin_to_left_boundary_cm
+
+    @property
+    def y_max_cm(self) -> float:
+        return self.boundary_size_cm - self.origin_to_left_boundary_cm
+
+    @property
+    def z_min_cm(self) -> float:
+        return -(self.boundary_size_cm - self.origin_to_top_boundary_cm)
+
+    @property
+    def z_max_cm(self) -> float:
+        return self.origin_to_top_boundary_cm
 
     def origin_to_right_boundary_cm(self) -> float:
         return self.boundary_size_cm - self.origin_to_left_boundary_cm
@@ -172,20 +180,25 @@ def distance(a: Vec2, b: Vec2) -> float:
     return math.hypot(a.x - b.x, a.y - b.y)
 
 
-def boundary_center(width: int, height: int) -> Vec2:
-    return Vec2(width / 2, height / 2)
+def workspace_center(config: WorldConfig) -> Vec2:
+    return Vec2(
+        (config.y_min_cm + config.y_max_cm) / 2.0,
+        (config.z_min_cm + config.z_max_cm) / 2.0,
+    )
 
 
 def distance_from_square_boundary(
     pos: Vec2,
     object_radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
 ) -> float:
-    left = pos.x - object_radius
-    right = width - (pos.x + object_radius)
-    top = pos.y - object_radius
-    bottom = height - (pos.y + object_radius)
+    left = pos.x - object_radius - y_min
+    right = y_max - (pos.x + object_radius)
+    top = pos.y - object_radius - z_min
+    bottom = z_max - (pos.y + object_radius)
 
     return min(left, right, top, bottom)
 
@@ -193,15 +206,19 @@ def distance_from_square_boundary(
 def is_inside_square_boundary(
     pos: Vec2,
     object_radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
 ) -> bool:
     return (
         distance_from_square_boundary(
             pos,
             object_radius,
-            width,
-            height,
+            y_min,
+            y_max,
+            z_min,
+            z_max,
         )
         >= 0
     )
@@ -210,17 +227,19 @@ def is_inside_square_boundary(
 def clamp_position_to_square(
     pos: Vec2,
     object_radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
     margin: float = 0.0,
 ) -> Vec2:
-    low_x = object_radius + margin
-    high_x = width - object_radius - margin
-    low_y = object_radius + margin
-    high_y = height - object_radius - margin
+    low_x = y_min + object_radius + margin
+    high_x = y_max - object_radius - margin
+    low_y = z_min + object_radius + margin
+    high_y = z_max - object_radius - margin
 
     if low_x > high_x or low_y > high_y:
-        return boundary_center(width, height)
+        return Vec2((y_min + y_max) / 2.0, (z_min + z_max) / 2.0)
 
     return Vec2(
         clamp(pos.x, low_x, high_x),
@@ -232,8 +251,10 @@ def distance_to_square_boundary_along_direction(
     pos: Vec2,
     direction: Vec2,
     object_radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
 ) -> float:
     unit_dir = direction.normalized()
 
@@ -243,14 +264,14 @@ def distance_to_square_boundary_along_direction(
     distances: list[float] = []
 
     if unit_dir.x > 1e-6:
-        distances.append((width - object_radius - pos.x) / unit_dir.x)
+        distances.append((y_max - object_radius - pos.x) / unit_dir.x)
     elif unit_dir.x < -1e-6:
-        distances.append((object_radius - pos.x) / unit_dir.x)
+        distances.append((y_min + object_radius - pos.x) / unit_dir.x)
 
     if unit_dir.y > 1e-6:
-        distances.append((height - object_radius - pos.y) / unit_dir.y)
+        distances.append((z_max - object_radius - pos.y) / unit_dir.y)
     elif unit_dir.y < -1e-6:
-        distances.append((object_radius - pos.y) / unit_dir.y)
+        distances.append((z_min + object_radius - pos.y) / unit_dir.y)
 
     positive_distances = [d for d in distances if d >= 0.0]
 
@@ -267,39 +288,88 @@ def clamp(value: float, low: float, high: float) -> float:
 def clamp_position(
     pos: Vec2,
     radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
 ) -> Vec2:
     return Vec2(
-        clamp(pos.x, radius, width - radius),
-        clamp(pos.y, radius, height - radius),
+        clamp(pos.x, y_min + radius, y_max - radius),
+        clamp(pos.y, z_min + radius, z_max - radius),
+    )
+
+
+def clamp_position_with_config(pos: Vec2, radius: float, config: WorldConfig) -> Vec2:
+    return clamp_position(
+        pos,
+        radius,
+        config.y_min_cm,
+        config.y_max_cm,
+        config.z_min_cm,
+        config.z_max_cm,
     )
 
 
 def distance_from_nearest_wall(
     pos: Vec2,
     radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
 ) -> float:
-    left = pos.x - radius
-    right = width - (pos.x + radius)
-    top = pos.y - radius
-    bottom = height - (pos.y + radius)
+    left = pos.x - radius - y_min
+    right = y_max - (pos.x + radius)
+    top = pos.y - radius - z_min
+    bottom = z_max - (pos.y + radius)
 
     return min(left, right, top, bottom)
+
+
+def distance_from_nearest_wall_with_config(
+    pos: Vec2,
+    radius: float,
+    config: WorldConfig,
+) -> float:
+    return distance_from_nearest_wall(
+        pos,
+        radius,
+        config.y_min_cm,
+        config.y_max_cm,
+        config.z_min_cm,
+        config.z_max_cm,
+    )
 
 
 def is_near_boundary(
     pos: Vec2,
     radius: float,
-    width: int,
-    height: int,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
     margin: float,
 ) -> bool:
     return (
-        distance_from_nearest_wall(pos, radius, width, height)
+        distance_from_nearest_wall(pos, radius, y_min, y_max, z_min, z_max)
         < margin
+    )
+
+
+def is_near_boundary_with_config(
+    pos: Vec2,
+    radius: float,
+    config: WorldConfig,
+    margin: float,
+) -> bool:
+    return is_near_boundary(
+        pos,
+        radius,
+        config.y_min_cm,
+        config.y_max_cm,
+        config.z_min_cm,
+        config.z_max_cm,
+        margin,
     )
 
 

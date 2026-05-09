@@ -107,7 +107,7 @@ class ArmStateMachine:
                 hand_delta = hand_pos - self.last_hand_pos
                 self.hand_velocity = hand_delta * (1.0 / dt)
                 self.hand_speed = self.hand_velocity.length()
-                if self.hand_speed > self.config.hand_stationary_speed:
+                if self.hand_speed > self.config.hand_stationary_speed_cm_s:
                     self.last_hand_motion_direction = hand_delta.normalized()
             else:
                 self.hand_velocity = Vec2(0.0, 0.0)
@@ -150,10 +150,10 @@ class ArmStateMachine:
         hand_ice_distance = distance(ice_pos, hand_pos)
 
         can_use_boundary_escape = (
-            hand_ice_distance <= self.config.boundary_escape_max_target_distance
+            hand_ice_distance <= self.config.boundary_escape_max_target_distance_cm
         )
 
-        if hand_ice_distance < self.config.contact_escape_distance:
+        if hand_ice_distance < self.config.contact_escape_distance_cm:
             if (
                 can_use_boundary_escape
                 and self._flat_escape_near_boundary(ice_pos, hand_pos)
@@ -167,11 +167,11 @@ class ArmStateMachine:
                 RobotState.NORMAL_ESCAPE,
                 (
                     f"hand inside contact escape distance: "
-                    f"{hand_ice_distance:.1f} < {self.config.contact_escape_distance:.1f}"
+                    f"{hand_ice_distance:.1f} < {self.config.contact_escape_distance_cm:.1f}"
                 ),
             )
 
-        if self.hand_speed <= self.config.hand_stationary_speed:
+        if self.hand_speed <= self.config.hand_stationary_speed_cm_s:
             if self.last_hand_motion_direction is not None:
                 return StateDecision(
                     RobotState.NORMAL_ESCAPE,
@@ -180,7 +180,7 @@ class ArmStateMachine:
 
             return StateDecision(
                 RobotState.IDLE,
-                f"hand is stationary: {self.hand_speed:.1f}px/s",
+                f"hand is stationary: {self.hand_speed:.1f}cm/s",
             )
 
         if not self._hand_is_moving_toward_ice(ice_pos, hand_pos):
@@ -200,9 +200,9 @@ class ArmStateMachine:
 
         if self.config.enable_close_retreat:
             actual_close_distance = (
-                self.config.hand_radius
-                + self.config.ice_radius
-                + self.config.close_distance
+                self.config.hand_radius_cm
+                + self.config.ice_radius_cm
+                + self.config.close_distance_cm
             )
 
             if hand_ice_distance <= actual_close_distance:
@@ -250,11 +250,11 @@ class ArmStateMachine:
         if self.last_hand_pos is None:
             return False
 
-        if self.time_since_hand_seen > self.config.hand_lost_blind_timeout:
+        if self.time_since_hand_seen > self.config.hand_lost_blind_timeout_s:
             return False
 
         expanded_blind_zone = self.config.blind_zone.expanded(
-            self.config.blind_zone_detection_margin
+            self.config.blind_zone_detection_margin_cm
         )
 
         return expanded_blind_zone.contains(self.last_hand_pos)
@@ -298,7 +298,7 @@ class ArmStateMachine:
 
         if forced_directions:
             algo.set_preferred_directions([])
-        elif self.hand_speed <= self.config.hand_stationary_speed:
+        elif self.hand_speed <= self.config.hand_stationary_speed_cm_s:
             algo.set_preferred_directions(
                 self._stationary_escape_directions()
             )
@@ -316,7 +316,7 @@ class ArmStateMachine:
         ice_pos: Vec2,
         hand_pos: Vec2,
     ) -> list[Vec2]:
-        if self.hand_velocity.length() < self.config.hand_stationary_speed:
+        if self.hand_velocity.length() < self.config.hand_stationary_speed_cm_s:
             return []
 
         target_to_ice = (ice_pos - hand_pos).normalized()
@@ -337,7 +337,7 @@ class ArmStateMachine:
     ) -> bool:
         toward_hand = (hand_pos - ice_pos).normalized()
         min_angle = self.config.flat_escape_min_angle_deg
-        if distance(ice_pos, hand_pos) < self.config.close_flat_escape_distance:
+        if distance(ice_pos, hand_pos) < self.config.close_flat_escape_distance_cm:
             min_angle = self.config.close_flat_escape_min_angle_deg
 
         min_dot = math.cos(math.radians(min_angle))
@@ -349,12 +349,14 @@ class ArmStateMachine:
             boundary_distance = distance_to_square_boundary_along_direction(
                 ice_pos,
                 direction,
-                self.config.ice_radius,
-                self.config.width,
-                self.config.height,
+                self.config.ice_radius_cm,
+                self.config.y_min_cm,
+                self.config.y_max_cm,
+                self.config.z_min_cm,
+                self.config.z_max_cm,
             )
 
-            if boundary_distance <= self.config.boundary_escape_distance:
+            if boundary_distance <= self.config.boundary_escape_distance_cm:
                 return True
 
         return False

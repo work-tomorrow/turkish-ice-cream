@@ -32,16 +32,11 @@ Core API 用的 IK helper。
     J3 = -J2 + extra_pitch
     J4 = -J1 + extra_yaw
 
-extra 啟用策略：
-    r <= extra_trigger_radius:
-        extra_pitch = 0
-        extra_yaw = 0
-
-    extra_trigger_radius < r < extra_full_radius:
-        extra 上限從 0 平滑增加到 max_extra
-
-    r >= extra_full_radius:
-        extra 上限為 ±max_extra
+這版已整合 robust IK：
+- L_ROD 預設 30 cm
+- 目標是半徑 25 cm 圓內盡量穩定解出
+- 如果 J2 撞到硬體限制，即使還在原本 trigger radius 內，也會啟用 extra
+- 使用 multi-start numerical IK，避免某些區域卡在局部解
 """
 
 from __future__ import annotations
@@ -51,6 +46,7 @@ import math
 from typing import Any
 
 import numpy as np
+
 
 # =========================
 # Data models
@@ -108,17 +104,21 @@ class JointLimit:
 class ArmIKConfig:
     # 單位：cm
     l_short: float = 15.0
-    l_rod: float = 100.0
+    l_rod: float = 30.0
     j2_forward_offset: float = 5.0
     j3_forward_offset: float = 5.0
+
+    # 這是希望穩定可用的 Y-Z 半徑，不是硬限制。
+    target_good_radius: float = 25.0
 
     # extra 啟用範圍，單位：cm
     extra_trigger_radius: float = 15.0
     extra_full_radius: float = 20.0
 
     # extra 最大角度，單位：degree
+    # L_ROD 改成 30 cm 後，30 度比 15 度更容易保證半徑 25 cm 內穩定。
     max_extra_pitch_deg: float = 30.0
-    max_extra_yaw_deg: float = 15.0
+    max_extra_yaw_deg: float = 30.0
 
     # 每顆馬達的實體角度範圍與方向
     # 這裡的 min/max 是「實際送給馬達」的角度，不是 model angle。
@@ -126,7 +126,8 @@ class ArmIKConfig:
     joint_limits: dict[str, JointLimit] = field(
         default_factory=lambda: {
             "J1": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
-            # 範例：J2 實體方向反了，而且 motor J2 最小只能到 -40 度。
+            # J2 實體方向反了；目前依你提供的檔案保留 motor J2 min=-30。
+            # 若硬體實測是 -40，改成 min_deg=-40.0 即可。
             "J2": JointLimit(min_deg=-30.0, max_deg=180.0, sign=-1.0, zero_deg=0.0),
             "J3": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
             "J4": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
@@ -134,16 +135,23 @@ class ArmIKConfig:
     )
 
     # solver 參數
-    max_iterations: int = 100
+    max_iterations: int = 120
     stop_error_cm: float = 0.03
     numerical_eps: float = 1e-4
-    step_scale: float = 0.5
+    step_scale: float = 0.6
+
+    # multi-start 設定
+    use_multistart: bool = True
 
     # regularization；越大代表越不想用該變數動
-    j1_penalty: float = 0.01
-    j2_penalty: float = 0.01
-    extra_pitch_penalty: float = 0.08
-    extra_yaw_penalty: float = 0.08
+    j1_penalty: float = 0.008
+    j2_penalty: float = 0.008
+    extra_pitch_penalty: float = 0.02
+    extra_yaw_penalty: float = 0.02
+
+    # 如果 J2 因為 joint limit 被 clamp，extra 會被打開。
+    # raw J2 和 clamped J2 差到這個角度以上時，limit activation = 1。
+    joint_limit_activation_full_deg: float = 8.0
 
 
 @dataclass(frozen=True)
@@ -162,6 +170,8 @@ class IKResult:
     extra_pitch_deg: float
     extra_yaw_deg: float
     activation: float
+    radial_activation: float
+    limit_activation: float
     reached_y_cm: float
     reached_z_cm: float
     reached_x_cm: float
@@ -188,6 +198,8 @@ class IKResult:
             "extra_pitch_deg": self.extra_pitch_deg,
             "extra_yaw_deg": self.extra_yaw_deg,
             "activation": self.activation,
+            "radial_activation": self.radial_activation,
+            "limit_activation": self.limit_activation,
             "reached_x_cm": self.reached_x_cm,
             "reached_y_cm": self.reached_y_cm,
             "reached_z_cm": self.reached_z_cm,
@@ -295,6 +307,15 @@ class ArmIKHelper:
         避免沿用上一段動作的 solver state。
         """
         self._last_v = None
+
+    def approximate_extra_reach_cm(self) -> float:
+        """
+        粗估 J3/J4 extra 在 Y-Z 平面能提供的額外位移。
+        """
+        cfg = self.config
+        max_extra_deg = max(cfg.max_extra_pitch_deg, cfg.max_extra_yaw_deg)
+        effective_extra_length = cfg.l_rod + cfg.j3_forward_offset
+        return effective_extra_length * math.sin(math.radians(max_extra_deg))
 
     def model_to_motor_angles(
         self, model_angles_deg: dict[str, float]
@@ -571,16 +592,20 @@ class ArmIKHelper:
         _, _, rod_end, _ = self.forward_kinematics(angles)
         return np.array([rod_end[1], rod_end[2]], dtype=float)
 
-    def _initial_guess_from_target(
-        self, target_y: float, target_z: float
+    def _raw_initial_guess_from_target(
+        self,
+        target_y: float,
+        target_z: float,
     ) -> np.ndarray:
+        """
+        不套 joint limit 的初始猜測，用來判斷 J2 是否撞到限制。
+        """
         cfg = self.config
 
         pitch_len = cfg.j2_forward_offset + cfg.l_short
         yaw_extra_len = cfg.j3_forward_offset
 
         j2 = math.asin(clamp(-target_z / pitch_len, -1.0, 1.0))
-
         effective_y_radius = pitch_len * math.cos(j2) + yaw_extra_len
 
         if abs(effective_y_radius) < 1e-9:
@@ -590,34 +615,107 @@ class ArmIKHelper:
 
         return np.array([j1, j2, 0.0, 0.0], dtype=float)
 
-    def _solve_yz(
+    def _initial_guess_from_target(
         self,
         target_y: float,
         target_z: float,
-        *,
-        initial_v: np.ndarray | None,
-        reachable_error_threshold_cm: float,
-    ) -> IKResult:
+        max_extra_pitch: float,
+        max_extra_yaw: float,
+    ) -> np.ndarray:
+        v = self._raw_initial_guess_from_target(target_y, target_z)
+        return self._clamp_v_to_joint_limits(v, max_extra_pitch, max_extra_yaw)
+
+    def _joint_limit_activation(self, target_y: float, target_z: float) -> float:
+        """
+        原本 activation 只看半徑，導致 target 在半徑 15 內時 extra 被關掉。
+        但如果 J2 已經撞到硬體限制，半徑 15 內也可能需要 J3 extra 幫忙。
+
+        這裡用 raw J2 和被 joint limit clamp 後的 J2 差距，平滑打開 extra。
+        """
         cfg = self.config
+        raw_v = self._raw_initial_guess_from_target(target_y, target_z)
+        raw_j2_deg = math.degrees(float(raw_v[1]))
+        clamped_j2_deg = self.clamp_model_angle("J2", raw_j2_deg)
 
-        target = np.array([target_y, target_z], dtype=float)
-        r = float(np.linalg.norm(target))
+        diff_deg = abs(raw_j2_deg - clamped_j2_deg)
+        return smoothstep(0.0, cfg.joint_limit_activation_full_deg, diff_deg)
 
-        activation = smoothstep(
-            cfg.extra_trigger_radius,
-            cfg.extra_full_radius,
-            r,
+    def _make_initial_candidates(
+        self,
+        target_y: float,
+        target_z: float,
+        max_extra_pitch: float,
+        max_extra_yaw: float,
+        initial_v: np.ndarray | None,
+    ) -> list[np.ndarray]:
+        """
+        多組 initial guess，避免 numerical IK 卡在局部解或 joint limit 邊界。
+        """
+        cfg = self.config
+        candidates: list[np.ndarray] = []
+
+        if initial_v is not None:
+            candidates.append(np.array(initial_v, dtype=float))
+
+        base = self._initial_guess_from_target(
+            target_y,
+            target_z,
+            max_extra_pitch,
+            max_extra_yaw,
+        )
+        candidates.append(base)
+
+        effective_len = max(1e-6, cfg.l_rod + cfg.j3_forward_offset)
+        ep_guess = math.asin(
+            clamp(
+                -target_z / effective_len,
+                -math.sin(max_extra_pitch),
+                math.sin(max_extra_pitch),
+            )
+        )
+        ey_guess = math.asin(
+            clamp(
+                target_y / effective_len,
+                -math.sin(max_extra_yaw),
+                math.sin(max_extra_yaw),
+            )
         )
 
-        max_extra_pitch = math.radians(cfg.max_extra_pitch_deg) * activation
-        max_extra_yaw = math.radians(cfg.max_extra_yaw_deg) * activation
+        v_guess = base.copy()
+        v_guess[2] = ep_guess
+        v_guess[3] = ey_guess
+        candidates.append(
+            self._clamp_v_to_joint_limits(v_guess, max_extra_pitch, max_extra_yaw)
+        )
 
-        if initial_v is None:
-            v = self._initial_guess_from_target(target_y, target_z)
-        else:
-            v = np.array(initial_v, dtype=float)
+        for ep in (-max_extra_pitch, 0.0, max_extra_pitch):
+            for ey in (-max_extra_yaw, 0.0, max_extra_yaw):
+                v = base.copy()
+                v[2] = ep
+                v[3] = ey
+                candidates.append(
+                    self._clamp_v_to_joint_limits(v, max_extra_pitch, max_extra_yaw)
+                )
 
-        # 先把 warm start / initial guess 夾回每顆馬達的可動範圍。
+        unique: list[np.ndarray] = []
+        seen: set[tuple[float, ...]] = set()
+
+        for v in candidates:
+            key = tuple(round(float(x), 5) for x in v)
+            if key not in seen:
+                unique.append(v)
+                seen.add(key)
+
+        return unique
+
+    def _solve_numerical_ik_once(
+        self,
+        target: np.ndarray,
+        v: np.ndarray,
+        max_extra_pitch: float,
+        max_extra_yaw: float,
+    ) -> tuple[float, np.ndarray, dict[str, float], np.ndarray]:
+        cfg = self.config
         v = self._clamp_v_to_joint_limits(v, max_extra_pitch, max_extra_yaw)
 
         for _ in range(cfg.max_iterations):
@@ -633,7 +731,14 @@ class ArmIKHelper:
             for i in range(4):
                 vv = v.copy()
                 vv[i] += cfg.numerical_eps
-                J[:, i] = (self._end_yz_from_vars(vv) - current) / cfg.numerical_eps
+                vv = self._clamp_v_to_joint_limits(
+                    vv,
+                    max_extra_pitch,
+                    max_extra_yaw,
+                )
+                J[:, i] = (
+                    self._end_yz_from_vars(vv) - current
+                ) / cfg.numerical_eps
 
             reg = np.diag(
                 [
@@ -671,18 +776,90 @@ class ArmIKHelper:
             "J4": raw_angles["J4"],
         }
 
-        motor_angles_deg = self.model_to_motor_angles(angles_deg)
-
         _, _, rod_end, _ = self.forward_kinematics(angles_deg)
+
+        error_cm = math.sqrt(
+            (float(rod_end[1]) - float(target[0])) ** 2
+            + (float(rod_end[2]) - float(target[1])) ** 2
+        )
+
+        return error_cm, v, raw_angles, rod_end
+
+    def _solve_yz(
+        self,
+        target_y: float,
+        target_z: float,
+        *,
+        initial_v: np.ndarray | None,
+        reachable_error_threshold_cm: float,
+    ) -> IKResult:
+        cfg = self.config
+
+        target = np.array([target_y, target_z], dtype=float)
+        r = float(np.linalg.norm(target))
+
+        radial_activation = smoothstep(
+            cfg.extra_trigger_radius,
+            cfg.extra_full_radius,
+            r,
+        )
+
+        limit_activation = self._joint_limit_activation(target_y, target_z)
+
+        activation = max(radial_activation, limit_activation)
+
+        max_extra_pitch = math.radians(cfg.max_extra_pitch_deg) * activation
+        max_extra_yaw = math.radians(cfg.max_extra_yaw_deg) * activation
+
+        candidates = self._make_initial_candidates(
+            target_y,
+            target_z,
+            max_extra_pitch,
+            max_extra_yaw,
+            initial_v=initial_v if cfg.use_multistart else None,
+        )
+
+        best: tuple[float, np.ndarray, dict[str, float], np.ndarray] | None = None
+
+        for candidate in candidates:
+            result = self._solve_numerical_ik_once(
+                target,
+                candidate,
+                max_extra_pitch,
+                max_extra_yaw,
+            )
+
+            if best is None or result[0] < best[0]:
+                best = result
+
+            if result[0] < cfg.stop_error_cm:
+                break
+
+            if not cfg.use_multistart:
+                break
+
+        if best is None:
+            raise RuntimeError("IK solver failed to produce a candidate")
+
+        error_cm, v, raw_angles, rod_end = best
+
+        angles_deg = {
+            "J1": raw_angles["J1"],
+            "J2": raw_angles["J2"],
+            "J3": raw_angles["J3"],
+            "J4": raw_angles["J4"],
+        }
+
+        motor_angles_deg = self.model_to_motor_angles(angles_deg)
 
         reached_x = float(rod_end[0])
         reached_y = float(rod_end[1])
         reached_z = float(rod_end[2])
 
-        error_cm = math.sqrt((reached_y - target_y) ** 2 + (reached_z - target_z) ** 2)
-
         if activation <= 1e-6:
             mode = "inside: extra disabled"
+        elif limit_activation > radial_activation + 1e-6:
+            mode = "joint-limit assist: extra enabled"
         elif activation >= 1.0 - 1e-6:
             mode = "outside: extra fully enabled"
         else:
@@ -696,6 +873,8 @@ class ArmIKHelper:
             extra_pitch_deg=raw_angles["extra_pitch"],
             extra_yaw_deg=raw_angles["extra_yaw"],
             activation=activation,
+            radial_activation=radial_activation,
+            limit_activation=limit_activation,
             reached_x_cm=reached_x,
             reached_y_cm=reached_y,
             reached_z_cm=reached_z,
@@ -713,8 +892,8 @@ class ArmIKHelper:
 if __name__ == "__main__":
     ik = ArmIKHelper()
 
-    for y, z in [(0, 0), (10, 0), (20, 0), (30, 10), (-25, -15)]:
-        result = ik.solve_yz(y, z)
+    for y, z in [(0, 0), (10, 0), (20, 0), (0, -20), (25, 0), (-25, 0), (15, -15), (-25, -15)]:
+        result = ik.solve_yz(y, z, warm_start=False)
         print(f"target=({y}, {z})")
         print(result.as_dict())
         print()
