@@ -143,20 +143,10 @@ class SessionCreateRequest(BaseModel):
     max_tease: int = 3
 
 
-class SessionPatchRequest(BaseModel):
-    active: Optional[bool] = None
-    reset: bool = False
-
-
 class SessionCreateResponse(BaseModel):
     ok: bool
     session: SessionSummary
     message: Optional[str] = None
-
-
-class SessionPatchResponse(BaseModel):
-    ok: bool
-    session: SessionSummary
 
 
 class SessionDeleteResponse(BaseModel):

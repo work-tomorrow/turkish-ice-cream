@@ -24,8 +24,6 @@
           :session="session"
           :busy="busy"
           @start="startSession"
-          @pause="setSessionActive(false)"
-          @reset="resetSession"
           @stop="stopSession"
         />
         <MotorCalibrationPanel
@@ -184,16 +182,6 @@ const startSession = () =>
   withBusy('start', async () => {
     await axios.post('/session', {})
     ElMessage.success('Session started')
-  })
-
-const setSessionActive = (active) =>
-  withBusy(active ? 'resume' : 'pause', async () => {
-    await axios.patch('/session', { active })
-  })
-
-const resetSession = () =>
-  withBusy('reset', async () => {
-    await axios.patch('/session', { reset: true })
   })
 
 const stopSession = () =>

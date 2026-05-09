@@ -40,6 +40,7 @@ class CoreApiMotorTest(unittest.TestCase):
 
         paths = schema["paths"]
         self.assertIn("/motors", paths)
+        self.assertNotIn("patch", schema["paths"]["/session"])
         self.assertNotIn("/motors/calibration", paths)
         self.assertIn("/motors/{motor_id}/jog", paths)
         self.assertIn("/motors/{motor_id}/zero", paths)
@@ -66,6 +67,8 @@ class CoreApiMotorTest(unittest.TestCase):
         self.assertNotIn("ActionName", schemas)
         self.assertNotIn("EmergencyStopSetResponse", schemas)
         self.assertNotIn("EmergencyStopClearResponse", schemas)
+        self.assertNotIn("SessionPatchRequest", schemas)
+        self.assertNotIn("SessionPatchResponse", schemas)
 
     def test_status_response_is_structured_without_session_counters(self) -> None:
         schema = app.openapi()

@@ -22,8 +22,6 @@ from core.app.models import (
     SessionCreateRequest,
     SessionCreateResponse,
     SessionDeleteResponse,
-    SessionPatchRequest,
-    SessionPatchResponse,
     SessionResponse,
     SessionSummary,
     StatusResponse,
@@ -144,23 +142,6 @@ async def create_session(
     request.app.state.tease_count = 0
     request.app.state.robot_state = RobotState.started
     return SessionCreateResponse(ok=True, session=_session_summary(request))
-
-
-@api_router.patch("/session", response_model=SessionPatchResponse, tags=["session"])
-async def update_session(
-    req: SessionPatchRequest,
-    request: Request,
-) -> SessionPatchResponse:
-    """Pause, resume, or reset the current demo session."""
-    if req.reset:
-        request.app.state.tease_count = 0
-    if req.active is not None:
-        request.app.state.running = req.active
-        request.app.state.robot_state = (
-            RobotState.started if req.active else RobotState.idle
-        )
-
-    return SessionPatchResponse(ok=True, session=_session_summary(request))
 
 
 @api_router.delete("/session", response_model=SessionDeleteResponse, tags=["session"])

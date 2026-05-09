@@ -18,12 +18,6 @@
       >
         Start
       </el-button>
-      <el-button :icon="SwitchButton" :loading="busy === 'pause'" @click="$emit('pause')">
-        Pause
-      </el-button>
-      <el-button :icon="RefreshLeft" :loading="busy === 'reset'" @click="$emit('reset')">
-        Reset
-      </el-button>
       <el-button type="danger" :icon="Close" :loading="busy === 'stop'" @click="$emit('stop')">
         Stop
       </el-button>
@@ -32,7 +26,7 @@
 </template>
 
 <script setup>
-import { Close, RefreshLeft, SwitchButton, VideoPlay } from '@element-plus/icons-vue'
+import { Close, VideoPlay } from '@element-plus/icons-vue'
 
 defineProps({
   session: {
@@ -45,7 +39,7 @@ defineProps({
   },
 })
 
-defineEmits(['start', 'pause', 'reset', 'stop'])
+defineEmits(['start', 'stop'])
 </script>
 
 <style scoped>
