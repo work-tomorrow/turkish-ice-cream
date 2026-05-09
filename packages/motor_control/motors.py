@@ -93,9 +93,6 @@ class ServoMotor:
         self.moving = False
         self.release()
 
-    def clear_stop(self) -> None:
-        pass
-
     def release(self) -> None:
         self._pwm.ChangeDutyCycle(0)
 
@@ -118,7 +115,9 @@ class ServoMotor:
 
     def _angle_to_duty(self, angle: float) -> float:
         progress = (angle - self.min_angle) / (self.max_angle - self.min_angle)
-        pulse_us = self._min_pulse_us + progress * (self._max_pulse_us - self._min_pulse_us)
+        pulse_us = self._min_pulse_us + progress * (
+            self._max_pulse_us - self._min_pulse_us
+        )
         period_us = 1_000_000.0 / self._frequency_hz
         return pulse_us / period_us * 100.0
 
@@ -206,9 +205,6 @@ class StepperMotor:
         self._target_steps = self._current_steps
         self.moving = False
         self._disable_driver()
-
-    def clear_stop(self) -> None:
-        pass
 
     def snapshot(self) -> MotorState:
         return MotorState(

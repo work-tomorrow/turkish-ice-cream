@@ -131,9 +131,15 @@ async def create_session(
             message="session already active",
         )
 
+    _ensure_motor_manager_ready(request)
+
     request.app.state.running = True
     request.app.state.robot_state = RobotState.started
-    return SessionCreateResponse(ok=True, session=_session_summary(request))
+
+    return SessionCreateResponse(
+        ok=True,
+        session=_session_summary(request),
+    )
 
 
 @api_router.delete("/session", response_model=SessionDeleteResponse, tags=["session"])
@@ -141,7 +147,7 @@ async def delete_session(request: Request) -> SessionDeleteResponse:
     """Stop the current demo session and all motors."""
     request.app.state.robot_state = RobotState.stopping
     request.app.state.running = False
-    request.app.state.motor_manager.emergency_stop()
+    request.app.state.motor_manager.stop()
     request.app.state.robot_state = RobotState.idle
     return SessionDeleteResponse(
         ok=True,

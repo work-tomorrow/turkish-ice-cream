@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.app.config import settings
+from core.app.controller import RobotController
 from core.app.models import Hand, RobotState
 from core.app.router import api_router
 from core.app.vision_state import vision_stale_monitor
@@ -20,18 +21,28 @@ async def lifespan(app: FastAPI):
     app.state.last_hand_result_at = None
     app.state.motor_manager = MotorManager()
     app.state.motor_manager_ready = False
+
     app.state.vision_stale_task = asyncio.create_task(
         vision_stale_monitor(
             app,
             timeout_seconds=settings.vision_stale_timeout_seconds,
         )
     )
+
+    app.state.controller = RobotController(app)
+    app.state.controller_task = asyncio.create_task(app.state.controller.run())
+
     try:
         yield
     finally:
         app.state.vision_stale_task.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.vision_stale_task
+
+        app.state.controller_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.controller_task
+
         app.state.motor_manager.cleanup()
 
 

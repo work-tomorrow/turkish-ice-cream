@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import patch
 
-from motor_control import MotorKind, MotorManager, build_default_motors, get_motor_profile
+from motor_control import (
+    MotorKind,
+    MotorManager,
+    build_default_motors,
+    get_motor_profile,
+)
 from motor_control.config import MOTOR_PROFILE_ENV
 from motor_control.mock_motors import MockMotor
 from motor_control.mock_motors import build_mock_motors
@@ -92,9 +97,7 @@ class MotorManagerTest(unittest.TestCase):
         self.assertEqual(state["motors"]["m4"]["target_angle"], 90.0)
 
     def test_emergency_stop_freezes_pose_but_next_command_can_continue(self) -> None:
-        self.manager.set_target_angles(
-            {"m1": 4.5, "m2": -4.5, "m3": 108.0, "m4": 72.0}
-        )
+        self.manager.set_target_angles({"m1": 4.5, "m2": -4.5, "m3": 108.0, "m4": 72.0})
         self.manager.emergency_stop()
         state = self.manager.get_state()
 

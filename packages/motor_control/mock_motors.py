@@ -6,7 +6,14 @@ from motor_control.models import MotorKind, MotorState
 
 
 class MockMotor:
-    def __init__(self, id: str, kind: MotorKind, min_angle: float, max_angle: float, home_angle: float = 0.0):
+    def __init__(
+        self,
+        id: str,
+        kind: MotorKind,
+        min_angle: float,
+        max_angle: float,
+        home_angle: float = 0.0,
+    ):
         self.id = id
         self.kind = kind
         self.min_angle = min_angle
@@ -28,9 +35,6 @@ class MockMotor:
 
     def stop_now(self) -> None:
         self.moving = False
-
-    def clear_stop(self) -> None:
-        pass
 
     def snapshot(self) -> MotorState:
         return MotorState(self.id, self.kind, self.current_angle, self.target_angle)

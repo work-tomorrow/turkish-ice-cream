@@ -133,9 +133,22 @@ class MotorManager:
         """Compatibility no-op for the old manager lifecycle."""
 
     def stop(self) -> None:
-        """Compatibility alias for cleanup()."""
+        """Stop all motors and freeze targets at the current pose.
 
-        self.cleanup()
+        This does not release GPIO resources, so the manager can continue
+        receiving set_target_angles() calls afterward.
+        """
+
+        for motor_id, motor in self.motors.items():
+            if hasattr(motor, "stop_now"):
+                motor.stop_now()
+            elif hasattr(motor, "stop"):
+                motor.stop()
+
+            self.current_targets[motor_id] = self._logical_current_angle(
+                motor_id,
+                motor,
+            )
 
     def home_all(self) -> None:
         """Move all motors to their home angle."""
@@ -148,16 +161,9 @@ class MotorManager:
         self.set_target_angles(targets)
 
     def emergency_stop(self) -> None:
-        """Immediately stop all motors and freeze targets at the current pose."""
+        """Compatibility alias for stop()."""
 
-        for motor_id, motor in self.motors.items():
-            if hasattr(motor, "stop_now"):
-                motor.stop_now()
-            elif hasattr(motor, "stop"):
-                motor.stop()
-            self.current_targets[motor_id] = self._logical_current_angle(
-                motor_id, motor
-            )
+        self.stop()
 
     def get_state(self) -> dict[str, Any]:
         """Return simple manager + motor state."""
