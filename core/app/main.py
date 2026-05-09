@@ -21,9 +21,12 @@ async def lifespan(app: FastAPI):
     app.state.last_hand_result_at = None
     app.state.motor_manager = MotorManager()
     app.state.motor_manager_ready = False
-    app.state.circle_demo_running = False
-    app.state.circle_demo_task = None
-    app.state.circle_demo_lock = asyncio.Lock()
+    app.state.debug_session_active = False
+    app.state.debug_move_task = None
+    app.state.debug_move_lock = asyncio.Lock()
+    app.state.debug_move_target_y_cm = None
+    app.state.debug_move_target_z_cm = None
+    app.state.debug_move_duration_s = None
 
     app.state.vision_stale_task = asyncio.create_task(
         vision_stale_monitor(
@@ -46,12 +49,11 @@ async def lifespan(app: FastAPI):
         with suppress(asyncio.CancelledError):
             await app.state.controller_task
 
-        circle_task = getattr(app.state, "circle_demo_task", None)
-        if circle_task is not None and not circle_task.done():
-            app.state.circle_demo_running = False
-            circle_task.cancel()
+        debug_move_task = getattr(app.state, "debug_move_task", None)
+        if debug_move_task is not None and not debug_move_task.done():
+            debug_move_task.cancel()
             with suppress(asyncio.CancelledError):
-                await circle_task
+                await debug_move_task
 
         app.state.motor_manager.cleanup()
 

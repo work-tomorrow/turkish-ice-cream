@@ -4,6 +4,10 @@
       <p class="eyebrow">Turkish Ice Cream Demo</p>
       <h1>Robot Control Panel</h1>
     </div>
+    <nav class="topbar-nav" aria-label="Primary">
+      <RouterLink to="/">Dashboard</RouterLink>
+      <RouterLink to="/debug">Debug Move</RouterLink>
+    </nav>
     <div class="topbar-actions">
       <el-tag :type="apiOnline ? 'success' : 'danger'" size="large">
         {{ apiOnline ? 'API Online' : 'API Offline' }}
@@ -15,6 +19,7 @@
 
 <script setup>
 import { Refresh } from '@element-plus/icons-vue'
+import { RouterLink } from 'vue-router'
 
 defineProps({
   apiOnline: {
@@ -65,11 +70,40 @@ h1 {
   gap: 12px;
 }
 
+.topbar-nav {
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  gap: 8px;
+}
+
+.topbar-nav a {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #475569;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.topbar-nav a.router-link-active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 @media (max-width: 640px) {
   .topbar {
     align-items: flex-start;
     flex-direction: column;
     padding: 16px;
+  }
+
+  .topbar-nav {
+    justify-content: flex-start;
   }
 }
 </style>

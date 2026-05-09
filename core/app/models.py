@@ -148,9 +148,42 @@ class SessionDeleteResponse(BaseModel):
     robot_state: RobotState
 
 
-class CircleDemoResponse(BaseModel):
+class DebugSessionResponse(BaseModel):
     ok: bool
     active: bool
+    moving: bool = False
     message: str = ""
-    radius_cm: float | None = None
-    period_s: float | None = None
+    target_y_cm: float | None = None
+    target_z_cm: float | None = None
+    duration_s: float | None = None
+
+
+class DebugMoveRequest(BaseModel):
+    y_cm: float = Field(
+        ...,
+        ge=-25.0,
+        le=25.0,
+        description="Robot-frame Y target in centimeters.",
+    )
+    z_cm: float = Field(
+        ...,
+        ge=-25.0,
+        le=25.0,
+        description="Robot-frame Z target in centimeters.",
+    )
+    duration_s: float = Field(
+        5.0,
+        gt=0.0,
+        le=60.0,
+        description="Move duration in seconds.",
+    )
+
+
+class DebugMoveResponse(BaseModel):
+    ok: bool
+    active: bool
+    moving: bool
+    message: str = ""
+    target_y_cm: float
+    target_z_cm: float
+    duration_s: float

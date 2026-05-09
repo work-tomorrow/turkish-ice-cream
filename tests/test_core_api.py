@@ -7,6 +7,7 @@ import core.app.main as core_main
 from core.app import router
 from core.app.main import app
 from core.app.models import (
+    DebugMoveRequest,
     Hand,
     HandDetectionBox,
     HandDetectionResult,
@@ -24,63 +25,94 @@ from motor_control import MotorManager
 from motor_control.mock_motors import build_mock_motors
 
 
-class CircleDemoApiTest(unittest.TestCase):
-    def test_circle_demo_conflict_when_session_started(self) -> None:
+class DebugMoveApiTest(unittest.TestCase):
+    def test_debug_session_conflict_when_session_started(self) -> None:
         from fastapi import HTTPException
 
         with _request_context() as request:
             request.app.state.robot_state = RobotState.started
             with self.assertRaises(HTTPException) as ctx:
-                asyncio.run(router.start_circle_demo(request, 25.0, 12.0))
+                asyncio.run(router.start_debug_session(request))
             self.assertEqual(ctx.exception.status_code, 409)
 
-    def test_circle_demo_rejects_unreachable_radius(self) -> None:
+    def test_debug_move_requires_active_debug_session(self) -> None:
         from fastapi import HTTPException
 
         with _request_context() as request:
             with self.assertRaises(HTTPException) as ctx:
-                asyncio.run(router.start_circle_demo(request, 50.0, 12.0))
+                asyncio.run(
+                    router.move_debug_yz(
+                        DebugMoveRequest(y_cm=0.0, z_cm=0.0),
+                        request,
+                    )
+                )
+            self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_debug_move_rejects_unreachable_target(self) -> None:
+        from fastapi import HTTPException
+
+        class UnreachableController:
+            def debug_yz_targets(self, **kwargs):
+                return None, 9.0
+
+        with _request_context() as request:
+            request.app.state.controller = UnreachableController()
+            request.app.state.debug_session_active = True
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(
+                    router.move_debug_yz(
+                        DebugMoveRequest(y_cm=0.0, z_cm=0.0),
+                        request,
+                    )
+                )
             self.assertEqual(ctx.exception.status_code, 400)
             self.assertIn("not reachable", str(ctx.exception.detail))
 
-    def test_circle_demo_rejects_duplicate_start(self) -> None:
-        from fastapi import HTTPException
-
-        async def exercise(request) -> None:
-            response = await router.start_circle_demo(request, 25.0, 12.0)
-            self.assertTrue(response.active)
-
-            with self.assertRaises(HTTPException) as ctx:
-                await router.start_circle_demo(request, 25.0, 12.0)
-            self.assertEqual(ctx.exception.status_code, 409)
-
-            await router.stop_circle_demo(request)
-
-        with _request_context() as request:
-            asyncio.run(exercise(request))
-
-    def test_circle_demo_stop_cancels_task_and_stops_motors(self) -> None:
+    def test_debug_move_replaces_existing_move(self) -> None:
         async def sleeper() -> None:
             await asyncio.sleep(999)
 
         async def exercise(request) -> None:
-            request.app.state.circle_demo_running = True
-            request.app.state.circle_demo_task = asyncio.create_task(sleeper())
+            await router.start_debug_session(request)
+            first_task = asyncio.create_task(sleeper())
+            request.app.state.debug_move_task = first_task
 
-            response = await router.stop_circle_demo(request)
+            response = await router.move_debug_yz(
+                DebugMoveRequest(y_cm=1.0, z_cm=2.0, duration_s=5.0),
+                request,
+            )
 
-            self.assertFalse(response.active)
-            self.assertFalse(request.app.state.circle_demo_running)
-            self.assertIsNone(request.app.state.circle_demo_task)
+            self.assertTrue(response.moving)
+            self.assertTrue(first_task.done())
+            self.assertIsNot(request.app.state.debug_move_task, first_task)
+            await router.stop_debug_session(request)
 
         with _request_context() as request:
             asyncio.run(exercise(request))
 
-    def test_session_conflict_when_circle_demo_running(self) -> None:
+    def test_debug_session_stop_cancels_task_and_stops_motors(self) -> None:
+        async def sleeper() -> None:
+            await asyncio.sleep(999)
+
+        async def exercise(request) -> None:
+            request.app.state.debug_session_active = True
+            request.app.state.debug_move_task = asyncio.create_task(sleeper())
+
+            response = await router.stop_debug_session(request)
+
+            self.assertFalse(response.active)
+            self.assertFalse(response.moving)
+            self.assertFalse(request.app.state.debug_session_active)
+            self.assertIsNone(request.app.state.debug_move_task)
+
+        with _request_context() as request:
+            asyncio.run(exercise(request))
+
+    def test_session_conflict_when_debug_session_active(self) -> None:
         from fastapi import HTTPException
 
         with _request_context() as request:
-            request.app.state.circle_demo_running = True
+            request.app.state.debug_session_active = True
             with self.assertRaises(HTTPException) as ctx:
                 asyncio.run(router.create_session(request))
             self.assertEqual(ctx.exception.status_code, 409)
@@ -103,8 +135,10 @@ class CoreApiMotorTest(unittest.TestCase):
         schema = app.openapi()
 
         paths = schema["paths"]
-        self.assertIn("/debug/circle-demo/start", paths)
-        self.assertIn("/debug/circle-demo/stop", paths)
+        self.assertIn("/debug/session", paths)
+        self.assertIn("/debug/move", paths)
+        self.assertNotIn("/debug/circle-demo/start", paths)
+        self.assertNotIn("/debug/circle-demo/stop", paths)
         self.assertIn("/motors", paths)
         self.assertNotIn("patch", schema["paths"]["/session"])
         self.assertNotIn("/motors/calibration", paths)
@@ -119,7 +153,10 @@ class CoreApiMotorTest(unittest.TestCase):
         schemas = schema["components"]["schemas"]
         self.assertIn("MotorsResponse", schemas)
         self.assertIn("MotorStatus", schemas)
-        self.assertIn("CircleDemoResponse", schemas)
+        self.assertIn("DebugSessionResponse", schemas)
+        self.assertIn("DebugMoveRequest", schemas)
+        self.assertIn("DebugMoveResponse", schemas)
+        self.assertNotIn("CircleDemoResponse", schemas)
         self.assertIn("MotorJogRequest", schemas)
         self.assertIn("MotorJogResponse", schemas)
         self.assertIn("MotorJogResult", schemas)
@@ -325,8 +362,11 @@ class _request_context:
             last_hand_result_at=None,
             motor_manager=self.motor_manager,
             motor_manager_ready=False,
-            circle_demo_running=False,
-            circle_demo_task=None,
+            debug_session_active=False,
+            debug_move_task=None,
+            debug_move_target_y_cm=None,
+            debug_move_target_z_cm=None,
+            debug_move_duration_s=None,
         )
         app_ns = SimpleNamespace(state=state)
         state.controller = RobotController(app_ns)

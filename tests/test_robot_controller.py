@@ -312,6 +312,44 @@ class RobotControllerTest(unittest.TestCase):
             },
         )
 
+    def test_debug_yz_targets_solves_robot_frame_yz(self) -> None:
+        controller = RobotController(SimpleNamespace())
+        fake_ik = _FakeIK()
+        controller.ik = fake_ik
+
+        targets, error_cm = controller.debug_yz_targets(
+            y_cm=6.0,
+            z_cm=7.0,
+            update_ik_state=True,
+            motor_state=_motor_state(),
+        )
+
+        self.assertEqual(error_cm, 0.0)
+        self.assertEqual(fake_ik.last_solve_target, (0.0, 6.0, 7.0))
+        self.assertEqual(
+            targets,
+            {
+                "m1": 1.0,
+                "m2": 91.0,
+                "m3": 92.0,
+                "m4": 93.0,
+            },
+        )
+
+    def test_debug_yz_targets_returns_none_when_unreachable(self) -> None:
+        controller = RobotController(SimpleNamespace())
+        controller.ik = _UnreachableIK()
+
+        targets, error_cm = controller.debug_yz_targets(
+            y_cm=6.0,
+            z_cm=7.0,
+            update_ik_state=False,
+            motor_state=_motor_state(),
+        )
+
+        self.assertIsNone(targets)
+        self.assertEqual(error_cm, 4.0)
+
     def test_ik_limits_are_derived_from_motor_manager_state(self) -> None:
         config = ik_config_from_motors(
             {
@@ -411,12 +449,30 @@ class _FailingIK(_FakeIK):
         pass
 
 
+class _UnreachableIK(_FakeIK):
+    def solve_xyz(self, **kwargs):
+        self.last_solve_target = (
+            kwargs["target_x_cm"],
+            kwargs["target_y_cm"],
+            kwargs["target_z_cm"],
+        )
+        return _UnreachableIKResult()
+
+
 class _FakeIKResult:
     reachable = True
     error_cm = 0.0
 
     def motor_targets(self):
         return {"J1": 1.0, "J2": 91.0, "J3": 92.0, "J4": 93.0}
+
+
+class _UnreachableIKResult:
+    reachable = False
+    error_cm = 4.0
+
+    def motor_targets(self):
+        return {}
 
 
 def _motor_state(max_velocity_deg_s=None):

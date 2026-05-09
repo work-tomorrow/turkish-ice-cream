@@ -248,14 +248,16 @@ class RobotController:
         )
         return targets if targets is not None else current_targets
 
-    def circle_demo_targets(
+    def debug_yz_targets(
         self,
         *,
         y_cm: float,
         z_cm: float,
         update_ik_state: bool,
+        motor_state: dict | None = None,
     ) -> tuple[dict[str, float] | None, float | None]:
-        motor_state = self.app.state.motor_manager.get_state()
+        if motor_state is None:
+            motor_state = self.app.state.motor_manager.get_state()
         self._sync_ik_limits(motor_state)
         current_targets = self._motor_targets(motor_state)
 
@@ -276,6 +278,11 @@ class RobotController:
             ),
             ik_result.error_cm,
         )
+
+    def current_xyz_cm(self) -> XYZPosition:
+        motor_state = self.app.state.motor_manager.get_state()
+        self._sync_ik_limits(motor_state)
+        return self._current_xyz(motor_state)
 
     def _motor_targets_for_xyz(
         self,

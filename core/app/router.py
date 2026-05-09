@@ -1,14 +1,15 @@
 import asyncio
 import logging
-import math
 from contextlib import suppress
 
-from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket
 from fastapi import WebSocketDisconnect
 from pydantic import ValidationError
 
 from core.app.models import (
-    CircleDemoResponse,
+    DebugMoveRequest,
+    DebugMoveResponse,
+    DebugSessionResponse,
     HandDetectionResult,
     MessageResponse,
     MotorDirection,
@@ -40,163 +41,153 @@ DEFAULT_STEP_DEGREES = 3.0
 
 logger = logging.getLogger(__name__)
 
-CIRCLE_DEMO_TICK_S = 0.1
-CIRCLE_DEMO_PREFLIGHT_SAMPLES = 16
+DEBUG_MOVE_TICK_S = 0.1
 
 
-def _circle_demo_lock(app: FastAPI) -> asyncio.Lock:
-    lock = getattr(app.state, "circle_demo_lock", None)
+def _debug_move_lock(app: FastAPI) -> asyncio.Lock:
+    lock = getattr(app.state, "debug_move_lock", None)
     if lock is None:
         lock = asyncio.Lock()
-        app.state.circle_demo_lock = lock
+        app.state.debug_move_lock = lock
     return lock
 
 
-def _circle_demo_task(app: FastAPI) -> asyncio.Task | None:
-    task = getattr(app.state, "circle_demo_task", None)
+def _debug_move_task(app: FastAPI) -> asyncio.Task | None:
+    task = getattr(app.state, "debug_move_task", None)
     if task is not None and task.done():
-        app.state.circle_demo_running = False
-        app.state.circle_demo_task = None
+        app.state.debug_move_task = None
         return None
     return task
 
 
-def _circle_demo_is_active(app: FastAPI) -> bool:
-    return bool(getattr(app.state, "circle_demo_running", False)) and (
-        _circle_demo_task(app) is not None
-    )
-
-
-def _circle_demo_point(
-    *,
-    radius_cm: float,
-    period_s: float,
-    elapsed_s: float,
-) -> tuple[float, float]:
-    theta = (2.0 * math.pi * elapsed_s) / period_s
-    return radius_cm * math.cos(theta), radius_cm * math.sin(theta)
-
-
-def _circle_demo_targets(
+def _debug_yz_targets(
     app: FastAPI,
     *,
     y_cm: float,
     z_cm: float,
     update_ik_state: bool,
 ) -> tuple[dict[str, float] | None, float | None]:
-    return app.state.controller.circle_demo_targets(
+    return app.state.controller.debug_yz_targets(
         y_cm=y_cm,
         z_cm=z_cm,
         update_ik_state=update_ik_state,
     )
 
 
-def _validate_circle_demo_path(
+def _validate_debug_target(
     app: FastAPI,
     *,
-    radius_cm: float,
-    period_s: float,
+    y_cm: float,
+    z_cm: float,
 ) -> None:
-    for sample in range(CIRCLE_DEMO_PREFLIGHT_SAMPLES):
-        elapsed_s = period_s * sample / CIRCLE_DEMO_PREFLIGHT_SAMPLES
-        y_cm, z_cm = _circle_demo_point(
-            radius_cm=radius_cm,
-            period_s=period_s,
-            elapsed_s=elapsed_s,
+    try:
+        targets, error_cm = _debug_yz_targets(
+            app,
+            y_cm=y_cm,
+            z_cm=z_cm,
+            update_ik_state=False,
         )
-        try:
-            targets, error_cm = _circle_demo_targets(
-                app,
-                y_cm=y_cm,
-                z_cm=z_cm,
-                update_ik_state=False,
-            )
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Circle demo path failed IK validation at "
-                    f"y={y_cm:.2f} cm, z={z_cm:.2f} cm: {exc}"
-                ),
-            ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Debug target failed IK validation at "
+                f"y={y_cm:.2f} cm, z={z_cm:.2f} cm: {exc}"
+            ),
+        ) from exc
 
-        if targets is None:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Circle demo path is not reachable at "
-                    f"y={y_cm:.2f} cm, z={z_cm:.2f} cm "
-                    f"(error={error_cm:.2f} cm)."
-                ),
-            )
+    if targets is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Debug target is not reachable at "
+                f"y={y_cm:.2f} cm, z={z_cm:.2f} cm "
+                f"(error={error_cm:.2f} cm)."
+            ),
+        )
 
 
-async def _stop_circle_demo(app: FastAPI) -> None:
-    app.state.circle_demo_running = False
-    task = getattr(app.state, "circle_demo_task", None)
+async def _cancel_debug_move(app: FastAPI) -> None:
+    task = getattr(app.state, "debug_move_task", None)
     if task is not None and not task.done():
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
-    app.state.circle_demo_task = None
+    app.state.debug_move_task = None
 
 
-async def _circle_demo_loop(
+def _debug_session_payload(app: FastAPI) -> DebugSessionResponse:
+    task = _debug_move_task(app)
+    return DebugSessionResponse(
+        ok=True,
+        active=bool(getattr(app.state, "debug_session_active", False)),
+        moving=task is not None,
+        target_y_cm=getattr(app.state, "debug_move_target_y_cm", None),
+        target_z_cm=getattr(app.state, "debug_move_target_z_cm", None),
+        duration_s=getattr(app.state, "debug_move_duration_s", None),
+    )
+
+
+async def _debug_move_loop(
     app: FastAPI,
     *,
-    radius_cm: float,
-    period_s: float,
+    target_y_cm: float,
+    target_z_cm: float,
+    duration_s: float,
 ) -> None:
     loop = asyncio.get_running_loop()
     t0 = loop.time()
     motor_manager = app.state.motor_manager
+    start_xyz = app.state.controller.current_xyz_cm()
+    start_y_cm = start_xyz.y_cm
+    start_z_cm = start_xyz.z_cm
 
     try:
-        while app.state.circle_demo_running:
+        while True:
             elapsed = loop.time() - t0
-            y_cm, z_cm = _circle_demo_point(
-                radius_cm=radius_cm,
-                period_s=period_s,
-                elapsed_s=elapsed,
-            )
+            progress = min(elapsed / duration_s, 1.0)
+            y_cm = start_y_cm + (target_y_cm - start_y_cm) * progress
+            z_cm = start_z_cm + (target_z_cm - start_z_cm) * progress
             try:
-                targets, error_cm = _circle_demo_targets(
+                targets, error_cm = _debug_yz_targets(
                     app,
                     y_cm=y_cm,
                     z_cm=z_cm,
                     update_ik_state=True,
                 )
             except Exception:
-                logger.warning("Circle demo IK failed; holding targets", exc_info=True)
-                await asyncio.sleep(CIRCLE_DEMO_TICK_S)
-                continue
+                logger.warning("Debug move IK failed; holding targets", exc_info=True)
+                app.state.robot_state = RobotState.error
+                break
 
             if targets is None:
                 logger.warning(
-                    "Circle demo target not reachable: y=%.2f z=%.2f err=%.2f",
+                    "Debug move target not reachable: y=%.2f z=%.2f err=%.2f",
                     y_cm,
                     z_cm,
                     error_cm,
                 )
-                await asyncio.sleep(CIRCLE_DEMO_TICK_S)
-                continue
+                app.state.robot_state = RobotState.error
+                break
 
             try:
                 motor_manager.set_target(targets)
             except Exception:
-                logger.exception("Circle demo motor update failed")
+                logger.exception("Debug move motor update failed")
                 app.state.robot_state = RobotState.error
                 break
 
-            await asyncio.sleep(CIRCLE_DEMO_TICK_S)
+            if progress >= 1.0:
+                break
+
+            await asyncio.sleep(DEBUG_MOVE_TICK_S)
     except asyncio.CancelledError:
         raise
     except Exception:
-        logger.exception("Circle demo loop failed")
+        logger.exception("Debug move loop failed")
         app.state.robot_state = RobotState.error
     finally:
-        app.state.circle_demo_running = False
-        app.state.circle_demo_task = None
+        app.state.debug_move_task = None
 
 
 def _status_payload(request: Request | WebSocket) -> StatusResponse:
@@ -288,10 +279,10 @@ async def create_session(
     request: Request,
 ) -> SessionCreateResponse:
     """Create or return the single active demo session."""
-    if getattr(request.app.state, "circle_demo_running", False):
+    if getattr(request.app.state, "debug_session_active", False):
         raise HTTPException(
             status_code=409,
-            detail="Stop the circle demo before starting a session.",
+            detail="End debug mode before starting a session.",
         )
     if request.app.state.running:
         return SessionCreateResponse(
@@ -485,77 +476,106 @@ async def get_session(request: Request) -> SessionResponse:
     return _session_payload(request)
 
 
-@api_router.post(
-    "/debug/circle-demo/start",
-    response_model=CircleDemoResponse,
+@api_router.get(
+    "/debug/session",
+    response_model=DebugSessionResponse,
     tags=["debug"],
 )
-async def start_circle_demo(
-    request: Request,
-    radius_cm: float = Query(
-        25.0,
-        gt=0,
-        le=50,
-        description="Y–Z plane circle radius in cm, centered at robot-frame origin.",
-    ),
-    period_s: float = Query(
-        12.0,
-        gt=0.5,
-        le=120.0,
-        description="Seconds per full revolution.",
-    ),
-) -> CircleDemoResponse:
-    """Test-only: move the end-effector on a circle (radius_cm) in the Y–Z plane."""
-    async with _circle_demo_lock(request.app):
-        if request.app.state.robot_state is not RobotState.idle:
+async def get_debug_session(request: Request) -> DebugSessionResponse:
+    """Return the current debug mode state."""
+    return _debug_session_payload(request.app)
+
+
+@api_router.post(
+    "/debug/session",
+    response_model=DebugSessionResponse,
+    tags=["debug"],
+)
+async def start_debug_session(request: Request) -> DebugSessionResponse:
+    """Start isolated debug mode for direct Y/Z movement."""
+    async with _debug_move_lock(request.app):
+        if (
+            request.app.state.running
+            or request.app.state.robot_state is not RobotState.idle
+        ):
             raise HTTPException(
                 status_code=409,
-                detail="Circle demo can only start while the robot is idle.",
-            )
-        if _circle_demo_is_active(request.app):
-            raise HTTPException(
-                status_code=409,
-                detail="Circle demo is already running.",
+                detail="Debug mode can only start while the robot session is idle.",
             )
 
         _ensure_motor_manager_ready(request)
-        _validate_circle_demo_path(
-            request.app,
-            radius_cm=radius_cm,
-            period_s=period_s,
-        )
+        request.app.state.debug_session_active = True
 
-        request.app.state.circle_demo_running = True
-        request.app.state.circle_demo_task = asyncio.create_task(
-            _circle_demo_loop(
-                request.app,
-                radius_cm=radius_cm,
-                period_s=period_s,
-            ),
-        )
-    return CircleDemoResponse(
-        ok=True,
-        active=True,
-        message="Circle demo started.",
-        radius_cm=radius_cm,
-        period_s=period_s,
-    )
+        response = _debug_session_payload(request.app)
+        response.message = "Debug mode started."
+        return response
 
 
 @api_router.delete(
-    "/debug/circle-demo/stop",
-    response_model=CircleDemoResponse,
+    "/debug/session",
+    response_model=DebugSessionResponse,
     tags=["debug"],
 )
-async def stop_circle_demo(request: Request) -> CircleDemoResponse:
-    """Stop the circle demo background loop."""
-    async with _circle_demo_lock(request.app):
-        await _stop_circle_demo(request.app)
+async def stop_debug_session(request: Request) -> DebugSessionResponse:
+    """End debug mode and stop any active debug movement."""
+    async with _debug_move_lock(request.app):
+        await _cancel_debug_move(request.app)
         request.app.state.motor_manager.stop()
-    return CircleDemoResponse(
+        request.app.state.debug_session_active = False
+        request.app.state.debug_move_target_y_cm = None
+        request.app.state.debug_move_target_z_cm = None
+        request.app.state.debug_move_duration_s = None
+
+        response = _debug_session_payload(request.app)
+        response.message = "Debug mode stopped."
+        return response
+
+
+@api_router.post(
+    "/debug/move",
+    response_model=DebugMoveResponse,
+    tags=["debug"],
+)
+async def move_debug_yz(
+    req: DebugMoveRequest,
+    request: Request,
+) -> DebugMoveResponse:
+    """Move the end-effector to a Y/Z target while debug mode is active."""
+    async with _debug_move_lock(request.app):
+        if not getattr(request.app.state, "debug_session_active", False):
+            raise HTTPException(
+                status_code=409,
+                detail="Start debug mode before sending debug move commands.",
+            )
+
+        _ensure_motor_manager_ready(request)
+        await _cancel_debug_move(request.app)
+        _validate_debug_target(
+            request.app,
+            y_cm=req.y_cm,
+            z_cm=req.z_cm,
+        )
+
+        request.app.state.debug_move_target_y_cm = req.y_cm
+        request.app.state.debug_move_target_z_cm = req.z_cm
+        request.app.state.debug_move_duration_s = req.duration_s
+        request.app.state.debug_move_task = asyncio.create_task(
+            _debug_move_loop(
+                request.app,
+                target_y_cm=req.y_cm,
+                target_z_cm=req.z_cm,
+                duration_s=req.duration_s,
+            ),
+        )
+
+    return DebugMoveResponse(
         ok=True,
-        active=False,
-        message="Circle demo stopped.",
+        active=True,
+        moving=True,
+        message="Debug move started.",
+        target_y_cm=req.y_cm,
+        target_z_cm=req.z_cm,
+        duration_s=req.duration_s,
     )
 
 
