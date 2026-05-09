@@ -108,6 +108,13 @@ The service keeps the camera preview local and pushes `HandDetectionResult`
 messages out to the RPI, so the computer does not need to accept inbound
 connections through its firewall.
 
+MediaPipe is intentionally not managed by Poetry. Install it into the active
+Poetry environment on the desktop machine:
+
+```sh
+poetry run pip install mediapipe
+```
+
 ```sh
 eval "$(poetry env activate)"
 cp vision_service/.env.example vision_service/.env
