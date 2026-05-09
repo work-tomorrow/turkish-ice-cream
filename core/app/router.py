@@ -13,6 +13,7 @@ from core.app.models import (
     HandDetectionResult,
     MessageResponse,
     MotorDirection,
+    MotorHomeResponse,
     MotorJogRequest,
     MotorJogResponse,
     MotorJogResult,
@@ -327,6 +328,30 @@ async def get_motors(request: Request) -> MotorsResponse:
     """List all motor states and jog step sizes."""
     return MotorsResponse(
         motors=_motor_payload(request),
+    )
+
+
+@api_router.post(
+    "/motors/home",
+    response_model=MotorHomeResponse,
+    tags=["motors"],
+)
+async def home_all_motors(request: Request) -> MotorHomeResponse:
+    """Move all motors to their configured home angles."""
+    _ensure_motor_manager_ready(request)
+    motor_ids = list(request.app.state.motor_manager.motors)
+    try:
+        request.app.state.motor_manager.home_all()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    return MotorHomeResponse(
+        ok=True,
+        homed_motor_ids=motor_ids,
+        motors=_motor_payload(request),
+        robot_state=request.app.state.robot_state,
     )
 
 

@@ -24,6 +24,7 @@
         <MotorCalibrationPanel
           :motors="motors"
           :busy="busy"
+          @home-motors="homeMotors"
           @move-motors="moveMotors"
           @jog-motor="jogMotor"
           @zero-motor="zeroMotor"
@@ -204,6 +205,12 @@ const moveMotors = (targets) =>
   withBusy('move-motors', async () => {
     await axios.post('/motors/targets', { targets })
     ElMessage.success('Motor targets updated')
+  })
+
+const homeMotors = () =>
+  withBusy('home-all', async () => {
+    await axios.post('/motors/home')
+    ElMessage.success('All motors moved to home')
   })
 
 const zeroMotor = (motorId) =>

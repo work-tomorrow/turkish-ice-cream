@@ -117,6 +117,13 @@ class MotorTargetResponse(BaseModel):
     robot_state: RobotState
 
 
+class MotorHomeResponse(BaseModel):
+    ok: bool
+    homed_motor_ids: list[str]
+    motors: list[MotorStatus]
+    robot_state: RobotState
+
+
 class MotorZeroResponse(BaseModel):
     ok: bool
     zeroed_motor_ids: list[str]

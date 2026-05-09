@@ -19,7 +19,10 @@ def get_motor_profile() -> MotorProfile:
     profile = os.getenv(MOTOR_PROFILE_ENV, "mock").strip().lower()
     if profile not in {"mock", "hardware"}:
         raise ValueError(
-            f"{MOTOR_PROFILE_ENV} must be 'mock' or 'hardware', got {profile!r}"
+            (
+                f"{MOTOR_PROFILE_ENV} must be 'mock' or 'hardware', "
+                f"got {profile!r}"
+            )
         )
 
     return profile
@@ -41,7 +44,13 @@ def build_default_motors(
 def build_hardware_motors() -> dict[str, StepperMotor | ServoMotor]:
     return {
         "m1": StepperMotor(
-            "m1", step_pin=20, dir_pin=16, enable_pin=21, min_angle=-45, max_angle=45
+            "m1",
+            step_pin=20,
+            dir_pin=16,
+            enable_pin=21,
+            enable_active_high=True,
+            min_angle=-45,
+            max_angle=45,
         ),  # 轉盤變大
         "m2": ServoMotor(
             "m2", pin=18, max_angle=105, min_angle=-5, home_angle=25

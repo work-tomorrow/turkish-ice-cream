@@ -116,7 +116,9 @@ class ServoMotor:
         GPIO.cleanup(self.pin)
 
     # def _angle_to_duty(self, angle: float) -> float:
-    #     progress = (angle - self.min_angle) / (self.max_angle - self.min_angle)
+    #     progress = (angle - self.min_angle) / (
+    #         self.max_angle - self.min_angle
+    #     )
     #     pulse_us = self._min_pulse_us + progress * (
     #         self._max_pulse_us - self._min_pulse_us
     #     )
@@ -134,17 +136,19 @@ class StepperMotor:
         dir_pin: int,
         *,
         enable_pin: int | None = None,
+        enable_active_high: bool = True,
         min_angle: float = -180.0,
         max_angle: float = 180.0,
         home_angle: float = 0.0,
         steps_per_rev: int = 200,
-        steps_per_second: float = 100.0,
+        steps_per_second: float = 400.0,
     ) -> None:
         self.id = id
         self.kind = MotorKind.STEPPER
         self.step_pin = step_pin
         self.dir_pin = dir_pin
         self.enable_pin = enable_pin
+        self._enable_active_high = bool(enable_active_high)
         self.min_angle = float(min_angle)
         self.max_angle = float(max_angle)
         self.home_angle = float(home_angle)
@@ -164,7 +168,9 @@ class StepperMotor:
         self._min_steps = math.ceil(self.min_angle * self._steps_per_degree)
         self._max_steps = math.floor(self.max_angle * self._steps_per_degree)
         if self._min_steps > self._max_steps:
-            raise ValueError("Stepper angle range is smaller than one reachable step")
+            raise ValueError(
+                "Stepper angle range is smaller than one reachable step"
+            )
 
         self._steps_per_second = max(1.0, float(steps_per_second))
         self._half_step_delay_s = 1.0 / (self._steps_per_second * 2.0)
@@ -248,14 +254,19 @@ class StepperMotor:
     def _run_worker(self) -> None:
         while True:
             with self._condition:
-                while not self._closed and self._current_steps == self._target_steps:
+                while (
+                    not self._closed
+                    and self._current_steps == self._target_steps
+                ):
                     self.moving = False
                     self._condition.wait()
 
                 if self._closed:
                     return
 
-                direction = 1 if self._target_steps > self._current_steps else -1
+                direction = (
+                    1 if self._target_steps > self._current_steps else -1
+                )
                 self.moving = True
 
             try:
@@ -326,11 +337,17 @@ class StepperMotor:
             return
 
         GPIO = _gpio()
-        GPIO.output(self.enable_pin, GPIO.LOW)
+        GPIO.output(
+            self.enable_pin,
+            GPIO.HIGH if self._enable_active_high else GPIO.LOW,
+        )
 
     def _disable_driver(self) -> None:
         if self.enable_pin is None:
             return
 
         GPIO = _gpio()
-        GPIO.output(self.enable_pin, GPIO.HIGH)
+        GPIO.output(
+            self.enable_pin,
+            GPIO.LOW if self._enable_active_high else GPIO.HIGH,
+        )

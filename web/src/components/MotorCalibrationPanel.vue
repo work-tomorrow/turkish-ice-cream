@@ -6,6 +6,15 @@
         <div class="panel-actions">
           <el-button
             size="small"
+            type="warning"
+            :disabled="motors.length === 0"
+            :loading="busy === 'home-all'"
+            @click="$emit('home-motors')"
+          >
+            Home All
+          </el-button>
+          <el-button
+            size="small"
             type="primary"
             :disabled="motors.length === 0"
             :loading="busy === 'move-motors'"
@@ -92,7 +101,7 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['move-motors', 'jog-motor', 'zero-motor'])
+const emit = defineEmits(['home-motors', 'move-motors', 'jog-motor', 'zero-motor'])
 
 const draftTargets = reactive({})
 
