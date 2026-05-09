@@ -1,7 +1,9 @@
 import asyncio
+import inspect
 import unittest
 from types import SimpleNamespace
 
+import core.app.main as core_main
 from core.app import router
 from core.app.main import app
 from core.app.models import Hand, MotorDirection, MotorJogRequest, RobotState
@@ -10,6 +12,15 @@ from motor_control.mock_motors import build_mock_motors
 
 
 class CoreApiMotorTest(unittest.TestCase):
+    def test_core_vision_uses_hand_tracking_camera_factory(self) -> None:
+        vision_loop_source = inspect.getsource(core_main._vision_loop)
+        main_source = inspect.getsource(core_main)
+
+        self.assertIn("create_default_camera", vision_loop_source)
+        self.assertNotIn("PiCamera2Camera", vision_loop_source)
+        self.assertNotIn("PiCameraConfig", vision_loop_source)
+        self.assertNotIn("from hand_tracking.detector", main_source)
+
     def test_motor_routes_replace_actions_routes(self) -> None:
         schema = app.openapi()
 
@@ -172,6 +183,7 @@ class _request_context:
             tease_count=0,
             max_tease=10,
             hand=Hand(),
+            vision_ready=True,
             motor_manager=self.motor_manager,
             motor_manager_ready=False,
         )

@@ -84,7 +84,7 @@ def _scale_detection(detection, frame_width: int, frame_height: int):
     if not detection.detected or detection.box is None:
         return detection
 
-    from hand_tracking.detector import Box, HandDetectionResult
+    from hand_tracking import Box, HandDetectionResult
 
     scale_x = frame_width / VISION_DETECTION_WIDTH
     scale_y = frame_height / VISION_DETECTION_HEIGHT
@@ -104,17 +104,14 @@ def _scale_detection(detection, frame_width: int, frame_height: int):
 async def _vision_loop(app: FastAPI) -> None:
     from hand_tracking import (
         HandDetector,
-        PiCamera2Camera,
-        PiCameraConfig,
+        create_default_camera,
         encode_frame_to_jpeg,
     )
 
-    camera = PiCamera2Camera(
-        PiCameraConfig(
-            width=VISION_WIDTH,
-            height=VISION_HEIGHT,
-            fps=VISION_FPS,
-        )
+    camera = create_default_camera(
+        width=VISION_WIDTH,
+        height=VISION_HEIGHT,
+        fps=VISION_FPS,
     )
     detector = None
     detection = None

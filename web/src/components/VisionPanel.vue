@@ -92,5 +92,6 @@ const handleFrameError = () => {
   max-height: 320px;
   object-fit: contain;
   image-rendering: pixelated;
+  transform: scaleX(-1);
 }
 </style>
