@@ -115,7 +115,7 @@ class ArmIKConfig:
     extra_full_radius: float = 20.0
 
     # extra 最大角度，單位：degree
-    max_extra_pitch_deg: float = 30.0
+    max_extra_pitch_deg: float = 60.0
     max_extra_yaw_deg: float = 30.0
 
     # 每顆馬達的實體角度範圍與方向
@@ -123,12 +123,11 @@ class ArmIKConfig:
     # 如果某顆馬達方向反了，把 sign 設成 -1.0。
     joint_limits: dict[str, JointLimit] = field(
         default_factory=lambda: {
-            "J1": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
-            # J2 實體方向反了；目前依你提供的檔案保留 motor J2 min=-30。
-            # 若硬體實測是 -40，改成 min_deg=-40.0 即可。
-            "J2": JointLimit(min_deg=-30.0, max_deg=90.0, sign=-1.0, zero_deg=0.0),
-            "J3": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
-            "J4": JointLimit(min_deg=-180.0, max_deg=180.0, sign=1.0, zero_deg=0.0),
+            "J1": JointLimit(min_deg=-45.0, max_deg=45.0, sign=1.0, zero_deg=0.0),
+            # 依照目前 visualizer 使用的範圍。
+            "J2": JointLimit(min_deg=-30.0, max_deg=90.0, sign=1.0, zero_deg=0.0),
+            "J3": JointLimit(min_deg=-60.0, max_deg=60.0, sign=1.0, zero_deg=0.0),
+            "J4": JointLimit(min_deg=-60.0, max_deg=60.0, sign=-1.0, zero_deg=0.0),
         }
     )
 
@@ -597,19 +596,28 @@ class ArmIKHelper:
     ) -> np.ndarray:
         """
         不套 joint limit 的初始猜測，用來判斷 J2 是否撞到限制。
+
+        這裡刻意與 visualizer 的 IK 保持一致：
+        先把目標投影到 extra trigger circle 內，再用原本的 keep-forward
+        幾何模型當作 numerical IK 的初始值。
         """
         cfg = self.config
 
-        pitch_len = cfg.j2_forward_offset + cfg.l_short
-        yaw_extra_len = cfg.j3_forward_offset
+        r = math.sqrt(target_y * target_y + target_z * target_z)
 
-        j2 = math.asin(clamp(-target_z / pitch_len, -1.0, 1.0))
-        effective_y_radius = pitch_len * math.cos(j2) + yaw_extra_len
-
-        if abs(effective_y_radius) < 1e-9:
-            j1 = 0.0
+        if r < 1e-9:
+            y = 0.0
+            z = 0.0
         else:
-            j1 = math.asin(clamp(target_y / effective_y_radius, -1.0, 1.0))
+            rr = min(r, cfg.extra_trigger_radius)
+            scale = rr / r
+            y = target_y * scale
+            z = target_z * scale
+
+        x_offset = math.sqrt(max(0.0, cfg.extra_trigger_radius**2 - y * y - z * z))
+
+        j1 = math.atan2(y, x_offset)
+        j2 = math.asin(clamp(-z / cfg.extra_trigger_radius, -1.0, 1.0))
 
         return np.array([j1, j2, 0.0, 0.0], dtype=float)
 
