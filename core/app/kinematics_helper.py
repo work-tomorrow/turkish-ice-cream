@@ -47,7 +47,6 @@ from typing import Any
 
 import numpy as np
 
-
 # =========================
 # Data models
 # =========================
@@ -104,7 +103,7 @@ class JointLimit:
 class ArmIKConfig:
     # 單位：cm
     l_short: float = 15.0
-    l_rod: float = 30.0
+    l_rod: float = 45.0
     j2_forward_offset: float = 5.0
     j3_forward_offset: float = 5.0
 
@@ -116,7 +115,6 @@ class ArmIKConfig:
     extra_full_radius: float = 20.0
 
     # extra 最大角度，單位：degree
-    # L_ROD 改成 30 cm 後，30 度比 15 度更容易保證半徑 25 cm 內穩定。
     max_extra_pitch_deg: float = 30.0
     max_extra_yaw_deg: float = 30.0
 
@@ -736,9 +734,7 @@ class ArmIKHelper:
                     max_extra_pitch,
                     max_extra_yaw,
                 )
-                J[:, i] = (
-                    self._end_yz_from_vars(vv) - current
-                ) / cfg.numerical_eps
+                J[:, i] = (self._end_yz_from_vars(vv) - current) / cfg.numerical_eps
 
             reg = np.diag(
                 [
@@ -892,7 +888,16 @@ class ArmIKHelper:
 if __name__ == "__main__":
     ik = ArmIKHelper()
 
-    for y, z in [(0, 0), (10, 0), (20, 0), (0, -20), (25, 0), (-25, 0), (15, -15), (-25, -15)]:
+    for y, z in [
+        (0, 0),
+        (10, 0),
+        (20, 0),
+        (0, -20),
+        (25, 0),
+        (-25, 0),
+        (15, -15),
+        (-25, -15),
+    ]:
         result = ik.solve_yz(y, z, warm_start=False)
         print(f"target=({y}, {z})")
         print(result.as_dict())
