@@ -34,6 +34,48 @@ class CircleDemoApiTest(unittest.TestCase):
                 asyncio.run(router.start_circle_demo(request, 25.0, 12.0))
             self.assertEqual(ctx.exception.status_code, 409)
 
+    def test_circle_demo_rejects_unreachable_radius(self) -> None:
+        from fastapi import HTTPException
+
+        with _request_context() as request:
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(router.start_circle_demo(request, 50.0, 12.0))
+            self.assertEqual(ctx.exception.status_code, 400)
+            self.assertIn("not reachable", str(ctx.exception.detail))
+
+    def test_circle_demo_rejects_duplicate_start(self) -> None:
+        from fastapi import HTTPException
+
+        async def exercise(request) -> None:
+            response = await router.start_circle_demo(request, 25.0, 12.0)
+            self.assertTrue(response.active)
+
+            with self.assertRaises(HTTPException) as ctx:
+                await router.start_circle_demo(request, 25.0, 12.0)
+            self.assertEqual(ctx.exception.status_code, 409)
+
+            await router.stop_circle_demo(request)
+
+        with _request_context() as request:
+            asyncio.run(exercise(request))
+
+    def test_circle_demo_stop_cancels_task_and_stops_motors(self) -> None:
+        async def sleeper() -> None:
+            await asyncio.sleep(999)
+
+        async def exercise(request) -> None:
+            request.app.state.circle_demo_running = True
+            request.app.state.circle_demo_task = asyncio.create_task(sleeper())
+
+            response = await router.stop_circle_demo(request)
+
+            self.assertFalse(response.active)
+            self.assertFalse(request.app.state.circle_demo_running)
+            self.assertIsNone(request.app.state.circle_demo_task)
+
+        with _request_context() as request:
+            asyncio.run(exercise(request))
+
     def test_session_conflict_when_circle_demo_running(self) -> None:
         from fastapi import HTTPException
 

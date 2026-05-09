@@ -10,7 +10,7 @@ class BaseAlgo:
         hand_pos: Vec2 | None,
         last_hand_pos: Vec2 | None,
         config: WorldConfig,
-    ):
+    ) -> None:
         pass
 
     def update(

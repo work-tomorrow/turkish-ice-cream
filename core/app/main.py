@@ -23,6 +23,7 @@ async def lifespan(app: FastAPI):
     app.state.motor_manager_ready = False
     app.state.circle_demo_running = False
     app.state.circle_demo_task = None
+    app.state.circle_demo_lock = asyncio.Lock()
 
     app.state.vision_stale_task = asyncio.create_task(
         vision_stale_monitor(

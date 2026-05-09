@@ -2,12 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from core.app.lab_escape.common import (
-    Vec2,
-    WorldConfig,
-    clamp,
-    move_toward,
-)
+from core.app.lab_escape.common import LabEscapeConfig, Vec2, clamp, move_toward
 from core.app.lab_escape.state_machine import ArmStateMachine
 
 
@@ -24,52 +19,7 @@ class YZPosition:
     z_cm: float
 
 
-@dataclass(frozen=True)
-class LabEscapeControllerConfig:
-    pixels_per_cm: float = 32.0
-    boundary_size_cm: float = 25.0
-    origin_to_left_boundary_cm: float = 12.5
-    origin_to_top_boundary_cm: float = 12.5
-
-    max_xyz_step_cm: float = 1.8
-
-    @property
-    def vision_width_px(self) -> float:
-        return self.boundary_size_cm * self.pixels_per_cm
-
-    @property
-    def vision_height_px(self) -> float:
-        return self.boundary_size_cm * self.pixels_per_cm
-
-    @property
-    def target_y_min_cm(self) -> float:
-        """Minimum robot Y (cm): ``-origin_to_left_boundary_cm``."""
-        return -self.origin_to_left_boundary_cm
-
-    @property
-    def origin_to_right_boundary_cm(self) -> float:
-        """Positive span from workspace origin to the right (+Y) boundary."""
-        return self.boundary_size_cm - self.origin_to_left_boundary_cm
-
-    @property
-    def target_y_max_cm(self) -> float:
-        """Maximum robot Y (cm): ``origin_to_right_boundary_cm``."""
-        return self.origin_to_right_boundary_cm
-
-    @property
-    def origin_to_bottom_boundary_cm(self) -> float:
-        """Positive span from workspace origin to the lower (-Z) boundary."""
-        return self.boundary_size_cm - self.origin_to_top_boundary_cm
-
-    @property
-    def target_z_min_cm(self) -> float:
-        """Minimum robot Z (cm): ``-origin_to_bottom_boundary_cm`` (below origin)."""
-        return -self.origin_to_bottom_boundary_cm
-
-    @property
-    def target_z_max_cm(self) -> float:
-        """Maximum robot Z (cm): ``origin_to_top_boundary_cm`` (above origin)."""
-        return self.origin_to_top_boundary_cm
+LabEscapeControllerConfig = LabEscapeConfig
 
 
 @dataclass(frozen=True)
@@ -84,23 +34,21 @@ class LabEscapeControllerResult:
 
 
 class LabEscapeController:
-    """
-    Adapter around the lab escape state machine.
+    """Adapter around the smooth-only lab escape state machine.
 
-    The canonical XYZ frame is the robot frame:
-    x = forward/back, y = left/right, z = up/down.
-
-    The state machine operates in the same YZ plane: Vec2.x is y_cm, Vec2.y is z_cm.
+    Robot frame:
+    - x = forward/back, unchanged by this controller
+    - y = left/right
+    - z = up/down
     """
 
     def __init__(self, config: LabEscapeControllerConfig | None = None) -> None:
         self.config = config or LabEscapeControllerConfig()
-        self.world = self._build_world_config(self.config)
-        self.state_machine = ArmStateMachine(self.world)
+        self.state_machine = ArmStateMachine(self.config)
         self._last_result: LabEscapeControllerResult | None = None
 
     def reset(self) -> None:
-        self.state_machine = ArmStateMachine(self.world)
+        self.state_machine = ArmStateMachine(self.config)
         self._last_result = None
 
     def compute_next_xyz(
@@ -110,14 +58,8 @@ class LabEscapeController:
         current_xyz_cm: XYZPosition,
         dt: float,
     ) -> LabEscapeControllerResult:
-        current_lab_pos = self._robot_yz_to_lab_vec(
-            YZPosition(current_xyz_cm.y_cm, current_xyz_cm.z_cm)
-        )
-        hand_lab_pos = (
-            self._robot_yz_to_lab_vec(hand_robot_yz)
-            if hand_robot_yz is not None
-            else None
-        )
+        current_lab_pos = self._robot_yz_to_lab_vec(YZPosition(current_xyz_cm.y_cm, current_xyz_cm.z_cm))
+        hand_lab_pos = self._robot_yz_to_lab_vec(hand_robot_yz) if hand_robot_yz is not None else None
 
         algo_result = self.state_machine.update(
             ice_pos=current_lab_pos,
@@ -129,19 +71,18 @@ class LabEscapeController:
         next_yz = self._move_yz_toward(
             current=YZPosition(current_xyz_cm.y_cm, current_xyz_cm.z_cm),
             target=next_yz,
-            max_distance=self.config.max_xyz_step_cm,
+            max_distance=self.config.max_command_step_cm,
         )
         next_yz = self._clamp_robot_yz(next_yz)
+
         next_xyz = XYZPosition(
             x_cm=float(current_xyz_cm.x_cm),
             y_cm=next_yz.y_cm,
             z_cm=next_yz.z_cm,
         )
+
         planned_landing_xyz = (
-            self._lab_vec_to_xyz(
-                algo_result.planned_landing,
-                current_x_cm=current_xyz_cm.x_cm,
-            )
+            self._lab_vec_to_xyz(algo_result.planned_landing, current_x_cm=current_xyz_cm.x_cm)
             if algo_result.planned_landing is not None
             else None
         )
@@ -162,66 +103,26 @@ class LabEscapeController:
     def last_result(self) -> LabEscapeControllerResult | None:
         return self._last_result
 
-    def _build_world_config(self, config: LabEscapeControllerConfig) -> WorldConfig:
-        return WorldConfig(
-            boundary_size_cm=config.boundary_size_cm,
-            origin_to_left_boundary_cm=config.origin_to_left_boundary_cm,
-            origin_to_top_boundary_cm=config.origin_to_top_boundary_cm,
-        )
-
     def _robot_yz_to_lab_vec(self, position: YZPosition) -> Vec2:
-        y_cm = clamp(
-            position.y_cm,
-            self.config.target_y_min_cm,
-            self.config.target_y_max_cm,
-        )
-        z_cm = clamp(
-            position.z_cm,
-            self.config.target_z_min_cm,
-            self.config.target_z_max_cm,
-        )
+        y_cm = clamp(position.y_cm, self.config.target_y_min_cm, self.config.target_y_max_cm)
+        z_cm = clamp(position.z_cm, self.config.target_z_min_cm, self.config.target_z_max_cm)
         return Vec2(y_cm, z_cm)
 
     def _lab_vec_to_xyz(self, pos: Vec2, *, current_x_cm: float) -> XYZPosition:
         yz = self._lab_vec_to_robot_yz(pos)
-        return XYZPosition(
-            x_cm=float(current_x_cm),
-            y_cm=yz.y_cm,
-            z_cm=yz.z_cm,
-        )
+        return XYZPosition(x_cm=float(current_x_cm), y_cm=yz.y_cm, z_cm=yz.z_cm)
 
     def _lab_vec_to_robot_yz(self, pos: Vec2) -> YZPosition:
         return self._clamp_robot_yz(YZPosition(y_cm=pos.x, z_cm=pos.y))
 
     def _clamp_robot_yz(self, position: YZPosition) -> YZPosition:
-        """
-        Clamp to the axis-aligned robot Y–Z workspace.
-
-        This must match the rectangular bounds used by the lab state machine
-        (`WorldConfig` / algorithm clamping). A secondary circular clamp would
-        remap valid square-corner poses inward and disagree with the workspace
-        model the algorithms assume.
-        """
         return YZPosition(
-            y_cm=clamp(
-                position.y_cm,
-                self.config.target_y_min_cm,
-                self.config.target_y_max_cm,
-            ),
-            z_cm=clamp(
-                position.z_cm,
-                self.config.target_z_min_cm,
-                self.config.target_z_max_cm,
-            ),
+            y_cm=clamp(position.y_cm, self.config.target_y_min_cm, self.config.target_y_max_cm),
+            z_cm=clamp(position.z_cm, self.config.target_z_min_cm, self.config.target_z_max_cm),
         )
 
     @staticmethod
-    def _move_yz_toward(
-        *,
-        current: YZPosition,
-        target: YZPosition,
-        max_distance: float,
-    ) -> YZPosition:
+    def _move_yz_toward(*, current: YZPosition, target: YZPosition, max_distance: float) -> YZPosition:
         next_pos = move_toward(
             current=Vec2(current.y_cm, current.z_cm),
             target=Vec2(target.y_cm, target.z_cm),

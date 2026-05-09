@@ -1,9 +1,11 @@
 import unittest
+from threading import Event
 from unittest.mock import patch
 
 from motor_control import (
     MotorKind,
     MotorManager,
+    StepperMotor,
     build_default_motors,
     get_motor_profile,
 )
@@ -150,6 +152,64 @@ class MotorManagerTest(unittest.TestCase):
     def test_set_current_angle_zero_rejects_unknown_motor(self) -> None:
         with self.assertRaises(ValueError):
             self.manager.set_current_angle_zero("unknown")
+
+
+class FakeGPIO:
+    BCM = "BCM"
+    OUT = "OUT"
+    HIGH = 1
+    LOW = 0
+
+    def setwarnings(self, value: bool) -> None:
+        pass
+
+    def setmode(self, mode: str) -> None:
+        pass
+
+    def setup(self, pin: int, mode: str) -> None:
+        pass
+
+    def output(self, pin: int, value: int) -> None:
+        pass
+
+    def cleanup(self, pin: int) -> None:
+        pass
+
+
+class StepperMotorTest(unittest.TestCase):
+    def test_move_to_returns_while_worker_is_still_stepping(self) -> None:
+        fake_gpio = FakeGPIO()
+
+        with patch("motor_control.motors._gpio", return_value=fake_gpio):
+            motor = StepperMotor(
+                "m1",
+                step_pin=16,
+                dir_pin=20,
+                steps_per_rev=200,
+                microsteps=16,
+                steps_per_second=1.0,
+            )
+            pulse_started = Event()
+            release_pulse = Event()
+
+            def blocking_pulse(direction: int) -> None:
+                pulse_started.set()
+                release_pulse.wait(timeout=1.0)
+
+            motor._pulse = blocking_pulse  # type: ignore[method-assign]
+
+            try:
+                motor.move_to(180.0)
+
+                self.assertTrue(pulse_started.wait(timeout=0.2))
+                state = motor.snapshot()
+                self.assertTrue(state.moving)
+                self.assertEqual(state.target_angle, 180.0)
+                self.assertNotEqual(state.current_angle, 180.0)
+            finally:
+                motor.stop_now()
+                release_pulse.set()
+                motor.cleanup()
 
 
 if __name__ == "__main__":

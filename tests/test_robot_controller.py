@@ -11,9 +11,7 @@ from core.app.controller import (
     compute_motion_cycles,
 )
 from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit
-from core.app.lab_escape import algo_variants, eight_direction_motion, state_machine
-from core.app.lab_escape.algo_variants import TurkishBoundaryVanishLandingAlgo
-from core.app.lab_escape.common import Vec2, WorldConfig
+from core.app.lab_escape import algo_variants, state_machine
 from core.app.lab_escape_controller import (
     LabEscapeController,
     LabEscapeControllerConfig,
@@ -95,7 +93,6 @@ class RobotControllerTest(unittest.TestCase):
             lab_escape_controller,
             state_machine,
             algo_variants,
-            eight_direction_motion,
         ):
             source = inspect.getsource(module)
             self.assertNotIn("algorithm_lab-kosu", source)
@@ -126,10 +123,23 @@ class RobotControllerTest(unittest.TestCase):
         self.assertIsNotNone(bottom_right)
         assert top_left is not None
         assert bottom_right is not None
-        self.assertEqual(top_left.y_cm, -12.5)
-        self.assertEqual(top_left.z_cm, 12.5)
-        self.assertEqual(bottom_right.y_cm, 12.5)
-        self.assertEqual(bottom_right.z_cm, -12.5)
+        self.assertEqual(top_left.y_cm, -25.0)
+        self.assertEqual(top_left.z_cm, 25.0)
+        self.assertEqual(bottom_right.y_cm, 25.0)
+        self.assertEqual(bottom_right.z_cm, -25.0)
+
+    def test_lab_escape_controller_and_state_machine_share_one_config(self) -> None:
+        config = LabEscapeControllerConfig(
+            escape_trigger_distance_cm=9.0,
+            max_command_step_cm=3.0,
+            pixels_per_cm=10.0,
+        )
+        controller = LabEscapeController(config)
+
+        self.assertIs(controller.config, config)
+        self.assertIs(controller.state_machine.config, config)
+        self.assertEqual(config.vision_width_px, 500.0)
+        self.assertEqual(config.target_y_min_cm, -25.0)
 
     def test_motion_cycles_use_angle_delta_velocity_and_dt(self) -> None:
         self.assertEqual(
@@ -318,24 +328,6 @@ class RobotControllerTest(unittest.TestCase):
         self.assertEqual(config.joint_limits["J2"].max_deg, 120.0)
         self.assertEqual(config.joint_limits["J2"].sign, -1.0)
         self.assertEqual(config.joint_limits["J2"].zero_deg, 90.0)
-
-    def test_kosu_vanish_result_exposes_planned_landing(self) -> None:
-        algo = TurkishBoundaryVanishLandingAlgo(vanish_time=0.25)
-        config = WorldConfig()
-        ice_pos = Vec2(0.0, 0.0)
-        hand_pos = Vec2(0.5, 0.0)
-
-        algo.on_enter(ice_pos, hand_pos, None, config)
-        result = algo.update(
-            ice_pos=ice_pos,
-            hand_pos=hand_pos,
-            last_hand_pos=None,
-            config=config,
-            dt=0.05,
-        )
-
-        self.assertFalse(result.visible)
-        self.assertIsNotNone(result.planned_landing)
 
 
 class KinematicsHelperTest(unittest.TestCase):

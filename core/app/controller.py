@@ -93,6 +93,7 @@ class CameraCalibrationConfig:
                 output_min=config.target_z_max_cm,
                 output_max=config.target_z_min_cm,
             ),
+            min_hand_confidence=config.min_hand_confidence,
         )
 
 

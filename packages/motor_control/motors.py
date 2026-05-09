@@ -6,6 +6,7 @@ Pin numbers are BCM GPIO numbers, not physical board pin numbers.
 
 from __future__ import annotations
 
+import threading
 import time
 from typing import Any
 
@@ -161,6 +162,11 @@ class StepperMotor:
         self._half_step_delay_s = 1.0 / (self._steps_per_second * 2.0)
         self._current_steps = self._angle_to_steps(home_angle)
         self._target_steps = self._current_steps
+        self._closed = False
+        self._stop_requested = False
+        self._pulse_active = False
+        self._zero_after_current_pulse = False
+        self._condition = threading.Condition()
 
         GPIO = _gpio()
         GPIO.setup(self.step_pin, GPIO.OUT)
@@ -170,54 +176,63 @@ class StepperMotor:
         if self.enable_pin is not None:
             GPIO.setup(self.enable_pin, GPIO.OUT)
             self._enable_driver()
+            self._disable_driver()
+
+        self._worker = threading.Thread(
+            target=self._run_worker,
+            name=f"{self.id}-stepper",
+            daemon=True,
+        )
+        self._worker.start()
 
     def move_to(self, angle: float, *, duration_ms: int = 0) -> None:
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
-        self.target_angle = angle
-        self._target_steps = self._angle_to_steps(angle)
-        if self._target_steps == self._current_steps:
-            self.moving = False
-            self._disable_driver()
-            return
 
-        self.moving = True
-        self._enable_driver()
-        direction = 1 if self._target_steps > self._current_steps else -1
+        with self._condition:
+            if self._closed:
+                raise RuntimeError(f"{self.id} has been cleaned up")
 
-        while self._current_steps != self._target_steps:
-            self._pulse(direction)
-            self._current_steps += direction
-
-        self.current_angle = _clamp(
-            self._steps_to_angle(self._current_steps),
-            self.min_angle,
-            self.max_angle,
-        )
-        self.target_angle = self.current_angle
-        self.moving = False
-        self._disable_driver()
+            self.target_angle = angle
+            self._target_steps = self._angle_to_steps(angle)
+            self._stop_requested = False
+            self._zero_after_current_pulse = False
+            self.moving = self._target_steps != self._current_steps
+            self.ready = True
+            self.last_error = None
+            self._condition.notify_all()
 
     def home(self) -> None:
         self.move_to(self.home_angle)
 
     def stop_now(self) -> None:
-        self.target_angle = self.current_angle
-        self._target_steps = self._current_steps
-        self.moving = False
-        self._disable_driver()
+        with self._condition:
+            self._stop_requested = True
+            self._target_steps = self._current_steps
+            self.target_angle = self.current_angle
+            self.moving = False
+            self._condition.notify_all()
 
     def snapshot(self) -> MotorState:
-        return MotorState(
-            id=self.id,
-            kind=self.kind,
-            current_angle=self.current_angle,
-            target_angle=self.target_angle,
-            moving=self.moving,
-            ready=self.ready,
-            last_error=self.last_error,
-        )
+        with self._condition:
+            return MotorState(
+                id=self.id,
+                kind=self.kind,
+                current_angle=self.current_angle,
+                target_angle=self.target_angle,
+                moving=self.moving,
+                ready=self.ready,
+                last_error=self.last_error,
+            )
 
     def cleanup(self) -> None:
+        with self._condition:
+            self._closed = True
+            self._target_steps = self._current_steps
+            self.moving = False
+            self._condition.notify_all()
+
+        self._worker.join(timeout=1.0)
+
         GPIO = _gpio()
         GPIO.output(self.step_pin, GPIO.LOW)
         self._disable_driver()
@@ -227,11 +242,85 @@ class StepperMotor:
             GPIO.cleanup(self.enable_pin)
 
     def set_current_angle_zero(self) -> None:
-        self._current_steps = 0
-        self._target_steps = 0
-        self.current_angle = 0.0
-        self.target_angle = 0.0
-        self.moving = False
+        with self._condition:
+            self._stop_requested = True
+            if self._pulse_active:
+                self._zero_after_current_pulse = True
+            else:
+                self._current_steps = 0
+                self._target_steps = 0
+
+            self.current_angle = 0.0
+            self.target_angle = 0.0
+            self.moving = False
+            self._condition.notify_all()
+
+    def _run_worker(self) -> None:
+        while True:
+            with self._condition:
+                while not self._closed and self._current_steps == self._target_steps:
+                    self.moving = False
+                    self._condition.wait()
+
+                if self._closed:
+                    return
+
+                direction = 1 if self._target_steps > self._current_steps else -1
+                self.moving = True
+                self._pulse_active = True
+
+            try:
+                self._enable_driver()
+                self._pulse(direction)
+            except Exception as exc:
+                with self._condition:
+                    self.ready = False
+                    self.last_error = str(exc)
+                    self._target_steps = self._current_steps
+                    self.target_angle = self.current_angle
+                    self.moving = False
+                    self._pulse_active = False
+                    self._stop_requested = False
+                    self._zero_after_current_pulse = False
+                    self._condition.notify_all()
+                self._disable_driver()
+                continue
+
+            should_disable = False
+            with self._condition:
+                self._pulse_active = False
+
+                if self._zero_after_current_pulse:
+                    self._current_steps = 0
+                    self._target_steps = 0
+                    self.current_angle = 0.0
+                    self.target_angle = 0.0
+                    self._stop_requested = False
+                    self._zero_after_current_pulse = False
+                else:
+                    self._current_steps += direction
+                    self.current_angle = _clamp(
+                        self._steps_to_angle(self._current_steps),
+                        self.min_angle,
+                        self.max_angle,
+                    )
+
+                    if self._stop_requested:
+                        self._target_steps = self._current_steps
+                        self.target_angle = self.current_angle
+                        self._stop_requested = False
+
+                self.moving = self._current_steps != self._target_steps
+                if not self.moving:
+                    self.target_angle = self.current_angle
+                    should_disable = True
+
+                self.ready = True
+                self.last_error = None
+                self._condition.notify_all()
+
+            if should_disable:
+                self._disable_driver()
 
     def _pulse(self, direction: int) -> None:
         GPIO = _gpio()

@@ -42,6 +42,121 @@ DEFAULT_STEP_DEGREES = 3.0
 logger = logging.getLogger(__name__)
 
 CIRCLE_DEMO_TICK_S = 0.1
+CIRCLE_DEMO_PREFLIGHT_SAMPLES = 16
+
+
+def _circle_demo_lock(app: FastAPI) -> asyncio.Lock:
+    lock = getattr(app.state, "circle_demo_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        app.state.circle_demo_lock = lock
+    return lock
+
+
+def _circle_demo_task(app: FastAPI) -> asyncio.Task | None:
+    task = getattr(app.state, "circle_demo_task", None)
+    if task is not None and task.done():
+        app.state.circle_demo_running = False
+        app.state.circle_demo_task = None
+        return None
+    return task
+
+
+def _circle_demo_is_active(app: FastAPI) -> bool:
+    return bool(getattr(app.state, "circle_demo_running", False)) and (
+        _circle_demo_task(app) is not None
+    )
+
+
+def _circle_demo_point(
+    *,
+    radius_cm: float,
+    period_s: float,
+    elapsed_s: float,
+) -> tuple[float, float]:
+    theta = (2.0 * math.pi * elapsed_s) / period_s
+    return radius_cm * math.cos(theta), radius_cm * math.sin(theta)
+
+
+def _circle_demo_targets(
+    app: FastAPI,
+    *,
+    y_cm: float,
+    z_cm: float,
+    update_ik_state: bool,
+) -> tuple[dict[str, float] | None, float | None]:
+    controller = app.state.controller
+    motor_state = app.state.motor_manager.get_state()
+    controller._sync_ik_limits(motor_state)
+    current_targets = controller._current_motor_targets(motor_state)
+
+    ik_result = controller.ik.solve_xyz(
+        target_x_cm=0.0,
+        target_y_cm=y_cm,
+        target_z_cm=z_cm,
+        update_state=update_ik_state,
+        reachable_error_threshold_cm=REACHABLE_ERROR_THRESHOLD_CM,
+    )
+    if not ik_result.reachable:
+        return None, ik_result.error_cm
+
+    return (
+        controller._joint_targets_to_motor_targets(
+            ik_result.motor_targets(),
+            base_targets=current_targets,
+        ),
+        ik_result.error_cm,
+    )
+
+
+def _validate_circle_demo_path(
+    app: FastAPI,
+    *,
+    radius_cm: float,
+    period_s: float,
+) -> None:
+    for sample in range(CIRCLE_DEMO_PREFLIGHT_SAMPLES):
+        elapsed_s = period_s * sample / CIRCLE_DEMO_PREFLIGHT_SAMPLES
+        y_cm, z_cm = _circle_demo_point(
+            radius_cm=radius_cm,
+            period_s=period_s,
+            elapsed_s=elapsed_s,
+        )
+        try:
+            targets, error_cm = _circle_demo_targets(
+                app,
+                y_cm=y_cm,
+                z_cm=z_cm,
+                update_ik_state=False,
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Circle demo path failed IK validation at "
+                    f"y={y_cm:.2f} cm, z={z_cm:.2f} cm: {exc}"
+                ),
+            ) from exc
+
+        if targets is None:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Circle demo path is not reachable at "
+                    f"y={y_cm:.2f} cm, z={z_cm:.2f} cm "
+                    f"(error={error_cm:.2f} cm)."
+                ),
+            )
+
+
+async def _stop_circle_demo(app: FastAPI) -> None:
+    app.state.circle_demo_running = False
+    task = getattr(app.state, "circle_demo_task", None)
+    if task is not None and not task.done():
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+    app.state.circle_demo_task = None
 
 
 async def _circle_demo_loop(
@@ -50,56 +165,53 @@ async def _circle_demo_loop(
     radius_cm: float,
     period_s: float,
 ) -> None:
-    """
-    在 robot frame 的 Y–Z 平面上，讓末端以 (0,0) 為圓心、半徑 radius_cm
-    畫圓；X 由目前機構的 Y–Z-only IK 決定，與主互動控制邏輯相同。
-    """
     loop = asyncio.get_running_loop()
     t0 = loop.time()
-    controller = app.state.controller
     motor_manager = app.state.motor_manager
 
     try:
         while app.state.circle_demo_running:
-            motor_state = motor_manager.get_state()
-            controller._sync_ik_limits(motor_state)
-            current_targets = controller._current_motor_targets(motor_state)
-
             elapsed = loop.time() - t0
-            theta = (2.0 * math.pi * elapsed) / period_s
-            y_cm = radius_cm * math.cos(theta)
-            z_cm = radius_cm * math.sin(theta)
-
+            y_cm, z_cm = _circle_demo_point(
+                radius_cm=radius_cm,
+                period_s=period_s,
+                elapsed_s=elapsed,
+            )
             try:
-                ik_result = controller.ik.solve_xyz(
-                    target_x_cm=0.0,
-                    target_y_cm=y_cm,
-                    target_z_cm=z_cm,
-                    reachable_error_threshold_cm=REACHABLE_ERROR_THRESHOLD_CM,
+                targets, error_cm = _circle_demo_targets(
+                    app,
+                    y_cm=y_cm,
+                    z_cm=z_cm,
+                    update_ik_state=True,
                 )
             except Exception:
                 logger.warning("Circle demo IK failed; holding targets", exc_info=True)
                 await asyncio.sleep(CIRCLE_DEMO_TICK_S)
                 continue
 
-            if not ik_result.reachable:
+            if targets is None:
                 logger.warning(
                     "Circle demo target not reachable: y=%.2f z=%.2f err=%.2f",
                     y_cm,
                     z_cm,
-                    ik_result.error_cm,
+                    error_cm,
                 )
                 await asyncio.sleep(CIRCLE_DEMO_TICK_S)
                 continue
 
-            targets = controller._joint_targets_to_motor_targets(
-                ik_result.motor_targets(),
-                base_targets=current_targets,
-            )
-            motor_manager.set_target(targets)
+            try:
+                motor_manager.set_target(targets)
+            except Exception:
+                logger.exception("Circle demo motor update failed")
+                app.state.robot_state = RobotState.error
+                break
+
             await asyncio.sleep(CIRCLE_DEMO_TICK_S)
     except asyncio.CancelledError:
         raise
+    except Exception:
+        logger.exception("Circle demo loop failed")
+        app.state.robot_state = RobotState.error
     finally:
         app.state.circle_demo_running = False
         app.state.circle_demo_task = None
@@ -412,27 +524,33 @@ async def start_circle_demo(
     ),
 ) -> CircleDemoResponse:
     """Test-only: move the end-effector on a circle (radius_cm) in the Y–Z plane."""
-    if request.app.state.robot_state is RobotState.started:
-        raise HTTPException(
-            status_code=409,
-            detail="Stop the interactive session before starting the circle demo.",
-        )
-    if getattr(request.app.state, "circle_demo_running", False):
-        raise HTTPException(
-            status_code=409,
-            detail="Circle demo is already running.",
-        )
+    async with _circle_demo_lock(request.app):
+        if request.app.state.robot_state is not RobotState.idle:
+            raise HTTPException(
+                status_code=409,
+                detail="Circle demo can only start while the robot is idle.",
+            )
+        if _circle_demo_is_active(request.app):
+            raise HTTPException(
+                status_code=409,
+                detail="Circle demo is already running.",
+            )
 
-    _ensure_motor_manager_ready(request)
-
-    request.app.state.circle_demo_running = True
-    request.app.state.circle_demo_task = asyncio.create_task(
-        _circle_demo_loop(
+        _ensure_motor_manager_ready(request)
+        _validate_circle_demo_path(
             request.app,
             radius_cm=radius_cm,
             period_s=period_s,
-        ),
-    )
+        )
+
+        request.app.state.circle_demo_running = True
+        request.app.state.circle_demo_task = asyncio.create_task(
+            _circle_demo_loop(
+                request.app,
+                radius_cm=radius_cm,
+                period_s=period_s,
+            ),
+        )
     return CircleDemoResponse(
         ok=True,
         active=True,
@@ -449,12 +567,9 @@ async def start_circle_demo(
 )
 async def stop_circle_demo(request: Request) -> CircleDemoResponse:
     """Stop the circle demo background loop."""
-    request.app.state.circle_demo_running = False
-    task = getattr(request.app.state, "circle_demo_task", None)
-    if task is not None and not task.done():
-        task.cancel()
-        with suppress(asyncio.CancelledError):
-            await task
+    async with _circle_demo_lock(request.app):
+        await _stop_circle_demo(request.app)
+        request.app.state.motor_manager.stop()
     return CircleDemoResponse(
         ok=True,
         active=False,

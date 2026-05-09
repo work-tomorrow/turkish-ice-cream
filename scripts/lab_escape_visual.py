@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """
-視覺化 lab escape 狀態機（機器人 YZ 公分平面）。
+視覺化 smooth-only lab escape 狀態機（機器人 YZ 公分平面）。
 
 執行（專案根目錄）:
   poetry run python scripts/lab_escape_visual.py
-  poetry run python scripts/lab_escape_visual.py --profile smooth
   poetry run python scripts/lab_escape_visual.py --backend mpl
 
 若系統 Python 沒有 Tcl/Tk（import tkinter 失敗），請用 --backend mpl 並安裝:
@@ -14,26 +13,43 @@
   - 在工作區內移動/拖曳滑鼠 = 手的位置 (y_cm, z_cm)
   - 移出工作區外再放開 = 無手（測試 IDLE / 盲區）
   - R: 冰淇淋回到中心並重置狀態機（matplotlib 視窗需聚焦後按鍵）
-  - C: 切換 enable_close_retreat 後重置狀態機
+  - C: 臨時切換 enable_close_retreat 後重置狀態機（預設關閉）
   - Q: 結束（matplotlib）
 
-座標: 橫軸 = 機器人 +Y（右），縱軸 = 機器人 +Z（上）。
+更新頻率:
+  - 畫面重繪約 60 FPS
+  - state machine / 冰淇淋 target 每 100ms 更新一次，模擬真機馬達 command rate
+
+座標:
+  - 橫軸 = 機器人 +Y（右）
+  - 縱軸 = 機器人 +Z（上）
+  - 工作區預設 = 以原點為中心，Y/Z 各方向半徑 25cm 的方形
+    也就是 y_cm, z_cm ∈ [-25, 25]
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+import time
+
+from core.app.lab_escape.common import LabEscapeConfig, Vec2
+from core.app.lab_escape.state_machine import ArmStateMachine
+
+
+RENDER_DT_S = 1.0 / 60.0
+CONTROL_DT_S = 0.1  # 100ms, matches real hardware command/update cadence
+
+
+def build_world() -> LabEscapeConfig:
+    """Use the same default config as the core robot controller."""
+
+    return LabEscapeConfig()
+
 
 _parser = argparse.ArgumentParser(
     description=__doc__,
     formatter_class=argparse.RawDescriptionHelpFormatter,
-)
-_parser.add_argument(
-    "--profile",
-    choices=("turkish_spec", "smooth", "performer", "safe"),
-    default="turkish_spec",
-    help="對應 state_machine 的演算法 profile",
 )
 _parser.add_argument(
     "--backend",
@@ -42,13 +58,6 @@ _parser.add_argument(
     help="auto: 優先 tkinter，失敗則用 matplotlib",
 )
 _args = _parser.parse_args()
-
-import core.app.lab_escape.state_machine as _state_machine
-
-_state_machine.ALGORITHM_PROFILE = _args.profile
-
-from core.app.lab_escape.common import Vec2, WorldConfig
-from core.app.lab_escape.state_machine import ArmStateMachine
 
 try:
     import tkinter as tk
@@ -65,8 +74,16 @@ def _hex(rgb: tuple[int, int, int]) -> str:
     return f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
 
 
+def _planned_landing(result) -> Vec2 | None:
+    return getattr(result, "planned_landing", None)
+
+
+def _visible(result) -> bool:
+    return bool(getattr(result, "visible", True))
+
+
 class LabEscapeVisualTk:
-    def __init__(self, root: tk.Tk, world: WorldConfig) -> None:
+    def __init__(self, root: tk.Tk, world: LabEscapeConfig) -> None:
         self.root = root
         self.world = world
         self.sm = ArmStateMachine(world)
@@ -74,10 +91,13 @@ class LabEscapeVisualTk:
         self.ice = Vec2(0.0, 0.0)
         self.hand: Vec2 | None = None
         self.mouse_in_workspace = False
-        self.dt = 1.0 / 60.0
+        self.render_dt = RENDER_DT_S
+        self.control_dt = CONTROL_DT_S
+        self.next_control_time = time.monotonic()
+        self.last_result = None
 
         root.title(
-            f"Lab escape 視覺 — profile={_state_machine.ALGORITHM_PROFILE} (YZ cm)"
+            "Lab escape 視覺 — smooth-only robot YZ workspace"
         )
 
         self.canvas_w = 720
@@ -127,7 +147,6 @@ class LabEscapeVisualTk:
         root.bind("<Key-Q>", lambda e: root.destroy())
 
         self._legend_drawn = False
-
         self._tick()
 
     def _world_to_canvas(self, p: Vec2) -> tuple[float, float]:
@@ -167,10 +186,14 @@ class LabEscapeVisualTk:
     def _reset_ice(self, _event: tk.Event | None = None) -> None:
         self.ice = Vec2(0.0, 0.0)
         self.sm = ArmStateMachine(self.world)
+        self.next_control_time = time.monotonic()
+        self.last_result = None
 
     def _toggle_close(self, _event: tk.Event | None = None) -> None:
         self.world.enable_close_retreat = not self.world.enable_close_retreat
         self.sm = ArmStateMachine(self.world)
+        self.next_control_time = time.monotonic()
+        self.last_result = None
 
     def _draw_static(self) -> None:
         if self._legend_drawn:
@@ -182,7 +205,10 @@ class LabEscapeVisualTk:
         x0, y0 = self._world_to_canvas(Vec2(p0.x, p1.y))
         x1, y1 = self._world_to_canvas(Vec2(p1.x, p0.y))
         self.canvas.create_rectangle(
-            x0, y0, x1, y1,
+            x0,
+            y0,
+            x1,
+            y1,
             outline="#888",
             width=2,
             fill="#f8f8f8",
@@ -195,7 +221,10 @@ class LabEscapeVisualTk:
             ax, ay = self._world_to_canvas(Vec2(a.x, c.y))
             cx_, cy_ = self._world_to_canvas(Vec2(c.x, a.y))
             self.canvas.create_rectangle(
-                ax, ay, cx_, cy_,
+                ax,
+                ay,
+                cx_,
+                cy_,
                 outline="#a060c0",
                 width=1,
                 dash=(4, 4),
@@ -222,19 +251,36 @@ class LabEscapeVisualTk:
             fill="#666",
             font=("Helvetica", 10),
         )
+        self.canvas.create_text(
+            12,
+            self.canvas_h - 12,
+            text=(
+                f"workspace: y ∈ [{self.world.y_min_cm:g}, {self.world.y_max_cm:g}], "
+                f"z ∈ [{self.world.z_min_cm:g}, {self.world.z_max_cm:g}] cm"
+            ),
+            anchor="sw",
+            fill="#666",
+            font=("Helvetica", 10),
+        )
 
     def _tick(self) -> None:
         self._draw_static()
 
-        hand_for_sm = self.hand if self.mouse_in_workspace else None
-        result = self.sm.update(self.ice, hand_for_sm, self.dt)
-        self.ice = result.pos
+        now = time.monotonic()
+        if self.last_result is None or now >= self.next_control_time:
+            hand_for_sm = self.hand if self.mouse_in_workspace else None
+            self.last_result = self.sm.update(self.ice, hand_for_sm, self.control_dt)
+            self.ice = self.last_result.pos
+            self.next_control_time = now + self.control_dt
+
+        result = self.last_result
+        assert result is not None
 
         self.canvas.delete("dynamic")
 
         r_ice = self.world.ice_radius_cm * self.px_per_cm
         ix, iy = self._world_to_canvas(self.ice)
-        if result.visible:
+        if _visible(result):
             self.canvas.create_oval(
                 ix - r_ice,
                 iy - r_ice,
@@ -272,8 +318,9 @@ class LabEscapeVisualTk:
                 tags="dynamic",
             )
 
-        if result.planned_landing is not None:
-            lx, ly = self._world_to_canvas(result.planned_landing)
+        planned = _planned_landing(result)
+        if planned is not None:
+            lx, ly = self._world_to_canvas(planned)
             r = 8
             self.canvas.create_oval(
                 lx - r,
@@ -291,7 +338,8 @@ class LabEscapeVisualTk:
             reason = reason[:97] + "..."
         self.info_var.set(
             f"state={self.sm.state.name}  |  hand_speed={self.sm.hand_speed:.2f} cm/s  "
-            f"|  close_retreat={self.world.enable_close_retreat}\n"
+            f"|  close_retreat={self.world.enable_close_retreat}  "
+            f"|  control_dt={self.control_dt * 1000:.0f}ms\n"
             f"reason: {reason}\n"
             f"algo: {result.status}\n"
             f"ice=({self.ice.x:.2f}, {self.ice.y:.2f}) cm"
@@ -302,13 +350,13 @@ class LabEscapeVisualTk:
             )
         )
 
-        self.root.after(int(self.dt * 1000), self._tick)
+        self.root.after(int(self.render_dt * 1000), self._tick)
 
 
 class LabEscapeVisualMpl:
     """matplotlib 後端（不依賴 Tcl/Tk）。"""
 
-    def __init__(self, world: WorldConfig) -> None:
+    def __init__(self, world: LabEscapeConfig) -> None:
         import matplotlib.pyplot as plt
         from matplotlib.animation import FuncAnimation
         from matplotlib.patches import Circle, Rectangle
@@ -323,21 +371,29 @@ class LabEscapeVisualMpl:
         self.ice = Vec2(0.0, 0.0)
         self.hand: Vec2 | None = None
         self.mouse_in_workspace = False
-        self.dt = 1.0 / 60.0
+        self.render_dt = RENDER_DT_S
+        self.control_dt = CONTROL_DT_S
+        self.next_control_time = time.monotonic()
+        self.last_result = None
 
         self.fig, self.ax = plt.subplots(figsize=(7.5, 7.5))
         mgr = getattr(self.fig.canvas, "manager", None)
         if mgr is not None and hasattr(mgr, "set_window_title"):
             mgr.set_window_title(
-                f"Lab escape — profile={_state_machine.ALGORITHM_PROFILE} (YZ cm)"
+                "Lab escape — smooth-only robot YZ workspace"
             )
 
-        pad = 1.5
+        pad = 2.0
         self.ax.set_xlim(world.y_min_cm - pad, world.y_max_cm + pad)
         self.ax.set_ylim(world.z_min_cm - pad, world.z_max_cm + pad)
         self.ax.set_aspect("equal")
         self.ax.set_xlabel("y_cm (robot Y)")
         self.ax.set_ylabel("z_cm (robot Z)")
+        self.ax.set_title(
+            "smooth-only lab escape — "
+            f"y=[{world.y_min_cm:g},{world.y_max_cm:g}] "
+            f"z=[{world.z_min_cm:g},{world.z_max_cm:g}] cm"
+        )
         self.ax.set_facecolor("#f0f0f0")
         self.ax.grid(True, alpha=0.35)
 
@@ -418,7 +474,7 @@ class LabEscapeVisualMpl:
         self._anim = FuncAnimation(
             self.fig,
             self._frame,
-            interval=int(self.dt * 1000),
+            interval=int(self.render_dt * 1000),
             blit=False,
             cache_frame_data=False,
         )
@@ -452,22 +508,30 @@ class LabEscapeVisualMpl:
         if event.key in ("r", "R"):
             self.ice = Vec2(0.0, 0.0)
             self.sm = ArmStateMachine(self.world)
+            self.next_control_time = time.monotonic()
+            self.last_result = None
         elif event.key in ("c", "C"):
             self.world.enable_close_retreat = not self.world.enable_close_retreat
             self.sm = ArmStateMachine(self.world)
+            self.next_control_time = time.monotonic()
+            self.last_result = None
         elif event.key in ("q", "Q"):
             self._plt.close(self.fig)
 
     def _frame(self, _i: int) -> None:
-        hand_for_sm = self.hand if self.mouse_in_workspace else None
-        result = self.sm.update(self.ice, hand_for_sm, self.dt)
-        self.ice = result.pos
+        now = time.monotonic()
+        if self.last_result is None or now >= self.next_control_time:
+            hand_for_sm = self.hand if self.mouse_in_workspace else None
+            self.last_result = self.sm.update(self.ice, hand_for_sm, self.control_dt)
+            self.ice = self.last_result.pos
+            self.next_control_time = now + self.control_dt
+
+        result = self.last_result
+        assert result is not None
 
         self._ice_patch.center = (self.ice.x, self.ice.y)
-        if result.visible:
-            self._ice_patch.set_facecolor(
-                tuple(c / 255.0 for c in result.color)
-            )
+        if _visible(result):
+            self._ice_patch.set_facecolor(tuple(c / 255.0 for c in result.color))
             self._ice_patch.set_edgecolor(
                 tuple(c / 255.0 for c in result.border_color)
             )
@@ -485,11 +549,9 @@ class LabEscapeVisualMpl:
         else:
             self._hand_patch.set_visible(False)
 
-        if result.planned_landing is not None:
-            self._planned_patch.center = (
-                result.planned_landing.x,
-                result.planned_landing.y,
-            )
+        planned = _planned_landing(result)
+        if planned is not None:
+            self._planned_patch.center = (planned.x, planned.y)
             self._planned_patch.set_visible(True)
         else:
             self._planned_patch.set_visible(False)
@@ -499,7 +561,8 @@ class LabEscapeVisualMpl:
             reason = reason[:107] + "..."
         self._text.set_text(
             f"state={self.sm.state.name}  hand_spd={self.sm.hand_speed:.2f} cm/s  "
-            f"close_r={self.world.enable_close_retreat}\n"
+            f"close_r={self.world.enable_close_retreat}  "
+            f"control_dt={self.control_dt * 1000:.0f}ms\n"
             f"reason: {reason}\n"
             f"algo: {result.status}\n"
             f"ice=({self.ice.x:.2f},{self.ice.y:.2f})"
@@ -515,7 +578,7 @@ class LabEscapeVisualMpl:
 
 
 def main() -> int:
-    world = WorldConfig()
+    world = build_world()
     backend = _args.backend
 
     if backend == "tk":

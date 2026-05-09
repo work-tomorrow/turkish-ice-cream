@@ -267,9 +267,9 @@ Responsibilities:
   - Configure STEP/DIR/optional ENABLE pins.
   - Convert angle to steps.
   - Provide `move_to()`, `stop_now()`, `snapshot()`, and `cleanup()`.
-  - Be careful: blocking stepping inside `move_to()` can delay the Core API
-    control loop. If this becomes a problem, move step generation to firmware,
-    pigpio, or a separate hardware driver layer.
+  - `move_to()` must only update the latest target and return quickly. A
+    background worker should generate STEP pulses so long physical moves do not
+    block Core API routes such as stop or status.
 
 ## Testing Requirements
 
