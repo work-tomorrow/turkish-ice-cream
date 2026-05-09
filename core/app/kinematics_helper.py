@@ -3,6 +3,14 @@ kinematics_helper.py
 
 Core API 用的 IK helper。
 
+座標定義：
+    這份 helper 的 XYZ 都是 robot frame，不是 camera frame，也不是
+    lab escape algorithm 的 2D screen frame。
+
+    x: 前後
+    y: 左右
+    z: 上下
+
 這份檔案是從 ik_visualizer_smooth.py 抽出來的「純計算版本」：
 - 沒有 matplotlib
 - 沒有 Slider
@@ -297,6 +305,55 @@ class ArmIKHelper:
             motor_deg = limit.model_to_motor(float(angle))
             output[joint] = limit.clamp_motor(motor_deg)
         return output
+
+    def motor_to_model_angles(
+        self,
+        motor_angles_deg: dict[str, float],
+    ) -> dict[str, float]:
+        output: dict[str, float] = {}
+        for joint, angle in motor_angles_deg.items():
+            limit = self.config.joint_limits[joint]
+            motor_deg = limit.clamp_motor(float(angle))
+            output[joint] = limit.motor_to_model(motor_deg)
+        return output
+
+    def end_xyz_from_motor_angles(
+        self,
+        motor_angles_deg: dict[str, float],
+    ) -> tuple[float, float, float]:
+        model_angles = self.motor_to_model_angles(motor_angles_deg)
+        _, _, rod_end, _ = self.forward_kinematics(model_angles)
+        return (
+            float(rod_end[0]),
+            float(rod_end[1]),
+            float(rod_end[2]),
+        )
+
+    def solve_xyz(
+        self,
+        *,
+        target_x_cm: float,
+        target_y_cm: float,
+        target_z_cm: float,
+        warm_start: bool = True,
+        update_state: bool = True,
+        reachable_error_threshold_cm: float = 0.5,
+    ) -> IKResult:
+        """
+        Solve a robot-frame XYZ target.
+
+        The current mechanism solver controls the Y/Z projection. target_x_cm
+        is accepted to keep the public control flow explicit, but it is not used
+        by the Y/Z-only IK solver yet.
+        """
+        _ = target_x_cm
+        return self.solve_yz(
+            target_y_cm=target_y_cm,
+            target_z_cm=target_z_cm,
+            warm_start=warm_start,
+            update_state=update_state,
+            reachable_error_threshold_cm=reachable_error_threshold_cm,
+        )
 
     def clamp_model_angle(self, joint: str, model_deg: float) -> float:
         """
