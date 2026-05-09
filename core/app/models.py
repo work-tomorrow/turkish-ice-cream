@@ -32,6 +32,19 @@ class Hand(BaseModel):
     confidence: Optional[float] = None
 
 
+class HandDetectionBox(BaseModel):
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+
+class HandDetectionResult(BaseModel):
+    detected: bool
+    box: Optional[HandDetectionBox] = None
+    confidence: float = 0.0
+
+
 class StatusSystem(BaseModel):
     ready: bool
     emergency_stopped: bool

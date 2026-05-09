@@ -13,11 +13,13 @@ dependencies = [
     "opencv-python>=4.10",
     "uvicorn[standard]>=0.32",
     "RPi.GPIO; sys_platform == 'linux' and platform_machine == 'aarch64'",
+    "python-dotenv (>=1.2.2,<2.0.0)",
 ]
 
 [tool.poetry]
 packages = [
     { include = "core" },
+    { include = "vision_service" },
     { include = "hand_tracking", from = "packages" },
     { include = "motor_control", from = "packages" },
 ]

@@ -23,7 +23,11 @@ See [Vite Configuration Reference](https://vite.dev/config/).
 
 ```sh
 npm install
+cp .env.example .env
 ```
+
+Set `VITE_API_BASE_URL` to the RPI core API. Set `VITE_VISION_API_BASE_URL` to
+the desktop vision service used for the camera preview.
 
 ### Compile and Hot-Reload for Development
 

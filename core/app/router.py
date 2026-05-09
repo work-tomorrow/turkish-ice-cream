@@ -1,13 +1,13 @@
 import asyncio
-import base64
 
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket
 from fastapi import WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from pydantic import ValidationError
 
 from core.app.models import (
     EmergencyStopClearResponse,
     EmergencyStopSetResponse,
+    HandDetectionResult,
     MessageResponse,
     MotorDirection,
     MotorJogRequest,
@@ -33,33 +33,11 @@ from core.app.models import (
     StatusSystem,
     StatusVision,
 )
+from core.app.vision_state import apply_hand_detection, mark_vision_disconnected
 
 api_router = APIRouter()
 
 DEFAULT_STEP_DEGREES = 3.0
-
-PLACEHOLDER_JPEG = base64.b64decode(
-    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
-    "2wBDAf//////////////////////////////////////////////////////////////////////////////////////"
-    "wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/"
-    "9oADAMBAAIQAxAAAAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAA"
-    "AAAAAAAA/9oACAEDAQE/ASP/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/ASP/xAAUEAEAAAAAAAAA"
-    "AAAAAAAAAAAA/9oACAEBAAY/Al//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAE/IV//2gAMAwEAAgAD"
-    "AAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAI"
-    "AQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z"
-)
-
-
-async def _vision_mjpeg_stream(request: Request):
-    while True:
-        frame = request.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
-        yield (
-            b"--frame\r\n"
-            b"Content-Type: image/jpeg\r\n\r\n"
-            + frame
-            + b"\r\n"
-        )
-        await asyncio.sleep(1 / 30)
 
 
 def _status_payload(request: Request | WebSocket) -> StatusResponse:
@@ -408,31 +386,28 @@ async def clear_emergency_stop(request: Request) -> EmergencyStopClearResponse:
 
 @api_router.get("/vision/frame", tags=["vision"])
 async def get_vision_frame(request: Request) -> Response:
-    """Return the latest vision frame with the current detection overlay."""
-    frame = request.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
-    return Response(content=frame, media_type="image/jpeg")
-
-
-@api_router.get("/vision/stream", tags=["vision"])
-async def get_vision_stream(request: Request) -> StreamingResponse:
-    """Stream the latest vision frames as MJPEG for a more stable browser preview."""
-    return StreamingResponse(
-        _vision_mjpeg_stream(request),
-        media_type="multipart/x-mixed-replace; boundary=frame",
+    """Vision preview moved to the desktop vision service."""
+    raise HTTPException(
+        status_code=410,
+        detail="Vision preview is served by the desktop vision service.",
     )
 
 
-@api_router.websocket("/ws/vision")
-async def ws_vision(ws: WebSocket):
-    """Stream the latest vision frame with the current detection overlay."""
+@api_router.websocket("/ws/hand-ingest")
+async def ws_hand_ingest(ws: WebSocket):
+    """Receive desktop hand detection results from the vision service."""
     await ws.accept()
     try:
         while True:
-            frame = ws.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
-            await ws.send_bytes(frame)
-            await asyncio.sleep(0.1)
+            payload = await ws.receive_json()
+            try:
+                result = HandDetectionResult.model_validate(payload)
+            except (TypeError, ValueError, ValidationError):
+                continue
+
+            apply_hand_detection(ws.app.state, result)
     except WebSocketDisconnect:
-        pass
+        mark_vision_disconnected(ws.app.state)
 
 
 @api_router.websocket("/ws/status")

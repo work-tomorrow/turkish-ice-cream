@@ -92,10 +92,46 @@ poetry install                           # creates .venv + installs packages
 
 ## 🛠 Start Core API
 
+Run this on the Raspberry Pi. The core API owns motors, sessions, and the
+RPI-side system status. It receives hand detection results from the desktop
+vision service over `ws://<rpi-ip>:8000/ws/hand-ingest`.
+
 ```sh
 eval "$(poetry env activate)"
 poetry run python -m core
 ```
+
+## 🖥 Start Desktop Vision Service
+
+Run this on the computer with the camera / MediaPipe hand detection workload.
+The service keeps the camera preview local and pushes `HandDetectionResult`
+messages out to the RPI, so the computer does not need to accept inbound
+connections through its firewall.
+
+```sh
+eval "$(poetry env activate)"
+cp vision_service/.env.example vision_service/.env
+poetry run python -m vision_service
+```
+
+Set `RPI_HAND_INGEST_WS_URL` in `vision_service/.env` to the RPI core ingest endpoint:
+
+```env
+RPI_HAND_INGEST_WS_URL=ws://<rpi-ip>:8000/ws/hand-ingest
+```
+
+The desktop service listens on `http://localhost:8010` by default and exposes:
+
+| Method | Path             | Purpose                                      |
+| ------ | ---------------- | -------------------------------------------- |
+| GET    | `/ping`          | Check whether the vision service is reachable. |
+| GET    | `/hand`          | Return the latest full hand detection result. |
+| GET    | `/vision/frame`  | Return the latest annotated frame. |
+| GET    | `/vision/stream` | Stream annotated frames as MJPEG. |
+
+For the demo web, copy `web/.env.example` to `web/.env`. Keep
+`VITE_API_BASE_URL` pointed at the RPI core API and set
+`VITE_VISION_API_BASE_URL` to the desktop vision service for the camera preview.
 
 ### Motors API
 
@@ -119,7 +155,9 @@ Example jog request:
 
 ### Status API
 
-`GET /status` returns overall runtime status without demo counters:
+`GET /status` returns the RPI-side runtime status without demo counters. The
+`vision` section shows the latest hand result that the RPI has received from the
+desktop vision service:
 
 ```json
 {

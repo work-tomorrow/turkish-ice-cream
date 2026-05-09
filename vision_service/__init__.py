@@ -1,0 +1,1 @@
+"""Desktop vision service package."""

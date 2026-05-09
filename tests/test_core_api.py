@@ -6,20 +6,34 @@ from types import SimpleNamespace
 import core.app.main as core_main
 from core.app import router
 from core.app.main import app
-from core.app.models import Hand, MotorDirection, MotorJogRequest, RobotState
+from core.app.models import (
+    Hand,
+    HandDetectionBox,
+    HandDetectionResult,
+    MotorDirection,
+    MotorJogRequest,
+    RobotState,
+)
+from core.app.vision_state import (
+    apply_hand_detection,
+    mark_vision_disconnected,
+    vision_is_stale,
+)
 from motor_control import MotorManager
 from motor_control.mock_motors import build_mock_motors
 
 
 class CoreApiMotorTest(unittest.TestCase):
-    def test_core_vision_uses_hand_tracking_camera_factory(self) -> None:
-        vision_loop_source = inspect.getsource(core_main._vision_loop)
+    def test_core_receives_remote_vision_instead_of_running_hand_tracking(self) -> None:
         main_source = inspect.getsource(core_main)
 
-        self.assertIn("create_default_camera", vision_loop_source)
-        self.assertNotIn("PiCamera2Camera", vision_loop_source)
-        self.assertNotIn("PiCameraConfig", vision_loop_source)
-        self.assertNotIn("from hand_tracking.detector", main_source)
+        self.assertNotIn("hand_tracking", main_source)
+        self.assertNotIn("_vision_loop", main_source)
+        self.assertIn("vision_stale_monitor", main_source)
+
+        route_paths = {route.path for route in app.routes}
+        self.assertIn("/ws/hand-ingest", route_paths)
+        self.assertNotIn("/ws/vision", route_paths)
 
     def test_motor_routes_replace_actions_routes(self) -> None:
         schema = app.openapi()
@@ -74,6 +88,50 @@ class CoreApiMotorTest(unittest.TestCase):
             )
             self.assertNotIn("tease_count", payload)
             self.assertNotIn("max_tease", payload)
+
+    def test_hand_ingest_updates_status_from_rpi_point_of_view(self) -> None:
+        with _request_context() as request:
+            apply_hand_detection(
+                request.app.state,
+                HandDetectionResult(
+                    detected=True,
+                    box=HandDetectionBox(x1=10, y1=20, x2=50, y2=80),
+                    confidence=0.75,
+                ),
+                now=100.0,
+            )
+
+            response = asyncio.run(router.get_status(request))
+            payload = response.model_dump()
+
+            self.assertTrue(payload["system"]["ready"])
+            self.assertTrue(payload["vision"]["hand_detected"])
+            self.assertEqual(payload["vision"]["hand"]["x"], 30.0)
+            self.assertEqual(payload["vision"]["hand"]["y"], 50.0)
+            self.assertEqual(payload["vision"]["hand"]["confidence"], 0.75)
+
+    def test_remote_vision_disconnect_and_timeout_clear_hand(self) -> None:
+        with _request_context() as request:
+            apply_hand_detection(
+                request.app.state,
+                HandDetectionResult(
+                    detected=True,
+                    box=HandDetectionBox(x1=0, y1=0, x2=20, y2=20),
+                    confidence=0.9,
+                ),
+                now=10.0,
+            )
+
+            self.assertFalse(vision_is_stale(request.app.state, 1.0, now=10.5))
+            self.assertTrue(vision_is_stale(request.app.state, 1.0, now=11.5))
+
+            mark_vision_disconnected(request.app.state)
+            response = asyncio.run(router.get_status(request))
+            payload = response.model_dump()
+
+            self.assertFalse(payload["system"]["ready"])
+            self.assertFalse(payload["vision"]["hand_detected"])
+            self.assertFalse(payload["vision"]["hand"]["detected"])
 
     def test_motors_lists_motor_state(self) -> None:
         with _request_context() as request:
@@ -184,6 +242,7 @@ class _request_context:
             max_tease=10,
             hand=Hand(),
             vision_ready=True,
+            last_hand_result_at=None,
             motor_manager=self.motor_manager,
             motor_manager_ready=False,
         )

@@ -98,15 +98,17 @@ const frameVersion = ref(Date.now())
 const frameError = ref(false)
 const updatedAt = ref(null)
 let statusSocket = null
+const visionBaseURL = (import.meta.env.VITE_VISION_API_BASE_URL || 'http://localhost:8010').replace(
+  /\/$/,
+  '',
+)
 
 const frameUrl = computed(() => {
-  const baseURL = axios.defaults.baseURL || ''
-  return `${baseURL}/vision/frame?t=${frameVersion.value}`
+  return `${visionBaseURL}/vision/frame?t=${frameVersion.value}`
 })
 
 const visionStreamUrl = computed(() => {
-  const baseURL = axios.defaults.baseURL || ''
-  return `${baseURL}/vision/stream`
+  return `${visionBaseURL}/vision/stream`
 })
 
 const lastUpdated = computed(() => {
