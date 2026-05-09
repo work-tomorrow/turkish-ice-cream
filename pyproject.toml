@@ -2,17 +2,16 @@
 name = "turkish-ice-cream"
 version = "0.1.0"
 description = ""
-authors = [
-    {name = "AaronWu-train",email = "aaronwu0218@gmail.com"}
-]
-license = {text = "MIT"}
+authors = [{ name = "AaronWu-train", email = "aaronwu0218@gmail.com" }]
+license = { text = "MIT" }
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.13"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
-    "mediapipe (>=0.10.35,<0.11.0)",
-    "opencv-python (>=4.13.0.92,<5.0.0.0)",
+    "mediapipe>=0.10.35,<0.11.0",
+    "opencv-python>=4.13.0.92,<5.0.0.0",
+    "RPi.GPIO",
 ]
 
 [tool.poetry]
