@@ -291,13 +291,11 @@ class ArmIKHelper:
     def model_to_motor_angles(
         self, model_angles_deg: dict[str, float]
     ) -> dict[str, float]:
-        """
-        把 IK / FK 使用的 model angles 轉成實際要送給馬達的 angles。
-        """
         output: dict[str, float] = {}
         for joint, angle in model_angles_deg.items():
             limit = self.config.joint_limits[joint]
-            output[joint] = normalize_deg(limit.model_to_motor(float(angle)))
+            motor_deg = limit.model_to_motor(float(angle))
+            output[joint] = limit.clamp_motor(motor_deg)
         return output
 
     def clamp_model_angle(self, joint: str, model_deg: float) -> float:
@@ -521,24 +519,19 @@ class ArmIKHelper:
     ) -> np.ndarray:
         cfg = self.config
 
-        r = math.sqrt(target_y * target_y + target_z * target_z)
+        pitch_len = cfg.j2_forward_offset + cfg.l_short
+        yaw_extra_len = cfg.j3_forward_offset
 
-        if r < 1e-9:
-            y = 0.0
-            z = 0.0
+        j2 = math.asin(clamp(-target_z / pitch_len, -1.0, 1.0))
+
+        effective_y_radius = pitch_len * math.cos(j2) + yaw_extra_len
+
+        if abs(effective_y_radius) < 1e-9:
+            j1 = 0.0
         else:
-            rr = min(r, cfg.extra_trigger_radius)
-            scale = rr / r
-            y = target_y * scale
-            z = target_z * scale
+            j1 = math.asin(clamp(target_y / effective_y_radius, -1.0, 1.0))
 
-        x_offset = math.sqrt(max(0.0, cfg.extra_trigger_radius**2 - y * y - z * z))
-
-        j1 = math.atan2(y, x_offset)
-        j2 = math.asin(clamp(-z / cfg.extra_trigger_radius, -1.0, 1.0))
-
-        v = np.array([j1, j2, 0.0, 0.0], dtype=float)
-        return v
+        return np.array([j1, j2, 0.0, 0.0], dtype=float)
 
     def _solve_yz(
         self,
