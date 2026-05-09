@@ -1,5 +1,7 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager, suppress
+from typing import Any
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,9 +13,61 @@ from core.app.router import api_router
 from core.app.vision_state import vision_stale_monitor
 from motor_control import MotorManager
 
+logger = logging.getLogger(__name__)
+_CORE_SIGNAL_PIN = 26
+
+
+class _CoreStartupSignalPin:
+    """Drive a dedicated GPIO pin HIGH during core runtime."""
+
+    def __init__(self, pin: int) -> None:
+        self._pin = pin
+        self._gpio: Any | None = None
+
+    def set_high(self) -> None:
+        try:
+            import RPi.GPIO as GPIO  # type: ignore
+        except ImportError:
+            return
+        except Exception as exc:
+            logger.warning(
+                "Failed to import RPi.GPIO for startup signal: %s",
+                exc,
+            )
+            return
+
+        try:
+            GPIO.setwarnings(False)
+            GPIO.setmode(GPIO.BCM)
+            GPIO.setup(self._pin, GPIO.OUT)
+            GPIO.output(self._pin, GPIO.HIGH)
+            self._gpio = GPIO
+        except Exception as exc:
+            logger.warning(
+                "Failed to set startup signal GPIO pin %s HIGH: %s",
+                self._pin,
+                exc,
+            )
+
+    def set_low(self) -> None:
+        if self._gpio is None:
+            return
+
+        try:
+            self._gpio.output(self._pin, self._gpio.LOW)
+        except Exception as exc:
+            logger.warning(
+                "Failed to set startup signal GPIO pin %s LOW: %s",
+                self._pin,
+                exc,
+            )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.core_signal_pin = _CoreStartupSignalPin(_CORE_SIGNAL_PIN)
+    app.state.core_signal_pin.set_high()
+
     app.state.running = False
     app.state.robot_state = RobotState.idle
     app.state.hand = Hand()
@@ -56,6 +110,7 @@ async def lifespan(app: FastAPI):
                 await debug_move_task
 
         app.state.motor_manager.cleanup()
+        app.state.core_signal_pin.set_low()
 
 
 app = FastAPI(
