@@ -128,7 +128,7 @@ class LabEscapeConfig:
 
     # State thresholds. These are the main knobs you are expected to tune.
     escape_trigger_distance_cm: float = 0.0
-    close_retreat_distance_cm: float = 1.0
+    close_retreat_distance_cm: float = 0.0
     boundary_enter_margin_cm: float = 1.0
     boundary_exit_margin_cm: float = 2.0
     enable_close_retreat: bool = True
