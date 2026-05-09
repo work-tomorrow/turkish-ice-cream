@@ -298,6 +298,7 @@ class StepperMotor:
                 self._disable_driver()
 
     def _pulse(self, direction: int) -> None:
+        print(f"Pulsing {self.id} in direction {direction}")
         GPIO = _gpio()
         GPIO.output(self.dir_pin, GPIO.HIGH if direction > 0 else GPIO.LOW)
         GPIO.output(self.step_pin, GPIO.HIGH)
@@ -308,7 +309,7 @@ class StepperMotor:
     def _angle_to_steps(self, angle: float) -> int:
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
         steps = self._round_steps(angle * self._steps_per_degree)
-        return steps
+        return max(self._min_steps, min(self._max_steps, steps))
 
     def _steps_to_angle(self, steps: int) -> float:
         return float(steps) / self._steps_per_degree

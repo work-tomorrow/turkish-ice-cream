@@ -98,9 +98,9 @@ class LabEscapeConfig:
     """
 
     # Workspace geometry: centered 50cm x 50cm square, y/z in [-25, 25].
-    boundary_size_cm: float = 50.0
-    origin_to_left_boundary_cm: float = 25.0
-    origin_to_top_boundary_cm: float = 25.0
+    boundary_size_cm: float = 30.0
+    origin_to_left_boundary_cm: float = 15.0
+    origin_to_top_boundary_cm: float = 15.0
 
     # Camera mapping. Calibrate these four image points to the physical
     # workspace corners, in this order:

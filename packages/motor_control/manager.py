@@ -52,7 +52,7 @@ class MotorManager:
         # Default speed limits.
         # You can tune these later based on the real robot.
         self.max_velocity_deg_s = {
-            "m1": 300.0,
+            "m1": 3600.0,
             "m2": 300.0,
             "m3": 300.0,
             "m4": 300.0,
