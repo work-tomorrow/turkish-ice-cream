@@ -3,23 +3,23 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from core.app import lab_escape_controller
+from core.app import escape_controller
 from core.app.config import Settings
-from core.app.controller import (
-    RobotController,
-    build_ik_config,
-    compute_motion_cycles,
-)
-from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit
-from core.app.lab_escape import algo_variants, state_machine
-from core.app.lab_escape_controller import (
-    LabEscapeController,
-    LabEscapeControllerConfig,
-    LabEscapeControllerResult,
+from core.app.escape_controller import (
+    EscapeController,
+    EscapeStep,
     XYZPosition,
     YZPosition,
 )
+from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit
+from core.app.lab_escape import algorithms, machine
+from core.app.lab_escape.common import LabEscapeConfig
 from core.app.models import Hand
+from core.app.robot_controller import (
+    RobotController,
+    ik_config_from_motors,
+    motion_cycles,
+)
 
 
 class RobotControllerTest(unittest.TestCase):
@@ -44,19 +44,19 @@ class RobotControllerTest(unittest.TestCase):
                 {"m1": 11.0, "m2": 22.0, "m3": 33.0, "m4": 44.0},
             )
 
-    def test_lab_escape_controller_does_not_own_ik_or_motor_targets(self) -> None:
-        source = inspect.getsource(LabEscapeController)
+    def test_escape_controller_does_not_own_ik_or_motor_targets(self) -> None:
+        source = inspect.getsource(EscapeController)
 
         self.assertNotIn("ArmIKHelper", source)
         self.assertNotIn("motor_state", source)
-        self.assertNotIn("compute_targets", source)
+        self.assertNotIn("next_targets", source)
         self.assertNotIn("sys.path", source)
         self.assertEqual(
-            LabEscapeController.__init__.__globals__["ArmStateMachine"].__module__,
-            "core.app.lab_escape.state_machine",
+            EscapeController.__init__.__globals__["EscapeStateMachine"].__module__,
+            "core.app.lab_escape.machine",
         )
 
-        result_fields = set(LabEscapeControllerResult.__dataclass_fields__)
+        result_fields = set(EscapeStep.__dataclass_fields__)
         self.assertIn("next_xyz_cm", result_fields)
         self.assertIn("visible", result_fields)
         self.assertIn("planned_landing_xyz_cm", result_fields)
@@ -64,8 +64,8 @@ class RobotControllerTest(unittest.TestCase):
 
     def test_clamp_robot_yz_matches_square_workspace_only(self) -> None:
         """Corners inside the rectangle must not be pulled toward the origin."""
-        cfg = LabEscapeControllerConfig()
-        ctl = LabEscapeController(cfg)
+        cfg = LabEscapeConfig()
+        ctl = EscapeController(cfg)
         corner = YZPosition(y_cm=cfg.target_y_max_cm, z_cm=cfg.target_z_max_cm)
         clamped = ctl._clamp_robot_yz(corner)
         self.assertAlmostEqual(clamped.y_cm, corner.y_cm)
@@ -73,7 +73,7 @@ class RobotControllerTest(unittest.TestCase):
 
     def test_lab_escape_workspace_z_and_y_spans_match_boundary_size(self) -> None:
         """Origin splits each axis so max - min equals the square edge length."""
-        cfg = LabEscapeControllerConfig(
+        cfg = LabEscapeConfig(
             boundary_size_cm=25.0,
             origin_to_left_boundary_cm=10.0,
             origin_to_top_boundary_cm=8.0,
@@ -90,20 +90,20 @@ class RobotControllerTest(unittest.TestCase):
 
     def test_core_lab_escape_imports_are_packaged(self) -> None:
         for module in (
-            lab_escape_controller,
-            state_machine,
-            algo_variants,
+            escape_controller,
+            machine,
+            algorithms,
         ):
             source = inspect.getsource(module)
             self.assertNotIn("algorithm_lab-kosu", source)
             self.assertNotIn("sys.path", source)
             self.assertNotIn("from common import", source)
-            self.assertNotIn("from state_machine import", source)
-            self.assertNotIn("from algo_variants import", source)
+            self.assertNotIn("from machine import", source)
+            self.assertNotIn("from algorithms import", source)
 
     def test_affine_calibration_maps_pixels_to_robot_yz_workspace(self) -> None:
         controller = RobotController(SimpleNamespace())
-        config = controller.escape_controller.config
+        config = controller.escape.config
         self.assertEqual(config.vision_width_px, 800.0)
         self.assertEqual(config.vision_height_px, 800.0)
 
@@ -128,22 +128,22 @@ class RobotControllerTest(unittest.TestCase):
         self.assertEqual(bottom_right.y_cm, 25.0)
         self.assertEqual(bottom_right.z_cm, -25.0)
 
-    def test_lab_escape_controller_and_state_machine_share_one_config(self) -> None:
-        config = LabEscapeControllerConfig(
+    def test_escape_controller_and_state_machine_share_one_config(self) -> None:
+        config = LabEscapeConfig(
             escape_trigger_distance_cm=9.0,
             max_command_step_cm=3.0,
             pixels_per_cm=10.0,
         )
-        controller = LabEscapeController(config)
+        controller = EscapeController(config)
 
         self.assertIs(controller.config, config)
-        self.assertIs(controller.state_machine.config, config)
+        self.assertIs(controller.machine.config, config)
         self.assertEqual(config.vision_width_px, 500.0)
         self.assertEqual(config.target_y_min_cm, -25.0)
 
     def test_motion_cycles_use_angle_delta_velocity_and_dt(self) -> None:
         self.assertEqual(
-            compute_motion_cycles(
+            motion_cycles(
                 start_targets={"m1": 0.0, "m2": 90.0},
                 target_targets={"m1": 30.0, "m2": 100.0},
                 max_velocity_deg_s={"m1": 100.0, "m2": 50.0},
@@ -152,16 +152,16 @@ class RobotControllerTest(unittest.TestCase):
             3,
         )
 
-    def test_compute_targets_uses_fk_escape_then_ik_and_returns_complete_targets(
+    def test_next_targets_uses_fk_escape_then_ik_and_returns_complete_targets(
         self,
     ) -> None:
         controller = RobotController(SimpleNamespace())
         fake_ik = _FakeIK()
         fake_escape = _FakeEscape()
         controller.ik = fake_ik
-        controller.escape_controller = fake_escape
+        controller.escape = fake_escape
 
-        targets = controller.compute_targets(
+        targets = controller.next_targets(
             hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
             motor_state=_motor_state(),
         )
@@ -189,7 +189,7 @@ class RobotControllerTest(unittest.TestCase):
     def test_vanish_lift_returns_configured_pose_for_computed_cycles(self) -> None:
         controller = RobotController(SimpleNamespace())
         controller.ik = _FakeIK()
-        controller.escape_controller = _InvisibleEscape()
+        controller.escape = _InvisibleEscape()
         controller.vanish_motor_targets = {
             "m1": 30.0,
             "m2": 90.0,
@@ -207,7 +207,7 @@ class RobotControllerTest(unittest.TestCase):
 
         for _ in range(3):
             self.assertEqual(
-                controller.compute_targets(
+                controller.next_targets(
                     hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
                     motor_state=motor_state,
                 ),
@@ -219,7 +219,7 @@ class RobotControllerTest(unittest.TestCase):
     def test_vanish_landing_returns_ik_targets_for_computed_cycles(self) -> None:
         controller = RobotController(SimpleNamespace())
         controller.ik = _FakeIK()
-        controller.escape_controller = _InvisibleEscape()
+        controller.escape = _InvisibleEscape()
         controller.vanish_motor_targets = {
             "m1": 0.0,
             "m2": 90.0,
@@ -235,7 +235,7 @@ class RobotControllerTest(unittest.TestCase):
             }
         )
 
-        controller.compute_targets(
+        controller.next_targets(
             hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
             motor_state=motor_state,
         )
@@ -247,7 +247,7 @@ class RobotControllerTest(unittest.TestCase):
         }
 
         self.assertEqual(
-            controller.compute_targets(
+            controller.next_targets(
                 hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
                 motor_state=motor_state,
             ),
@@ -255,7 +255,7 @@ class RobotControllerTest(unittest.TestCase):
         )
         self.assertEqual(controller._vanish_sequence.phase, "landing")
         self.assertEqual(
-            controller.compute_targets(
+            controller.next_targets(
                 hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
                 motor_state=motor_state,
             ),
@@ -266,7 +266,7 @@ class RobotControllerTest(unittest.TestCase):
     def test_vanish_landing_ik_failure_holds_current_targets_and_resets(self) -> None:
         controller = RobotController(SimpleNamespace())
         controller.ik = _FailingIK()
-        controller.escape_controller = _InvisibleEscape()
+        controller.escape = _InvisibleEscape()
         controller.vanish_motor_targets = {
             "m1": 0.0,
             "m2": 90.0,
@@ -275,12 +275,12 @@ class RobotControllerTest(unittest.TestCase):
         }
         motor_state = _motor_state()
 
-        controller.compute_targets(
+        controller.next_targets(
             hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
             motor_state=motor_state,
         )
-        with self.assertLogs("core.app.controller", level="WARNING"):
-            targets = controller.compute_targets(
+        with self.assertLogs("core.app.robot_controller", level="WARNING"):
+            targets = controller.next_targets(
                 hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
                 motor_state=motor_state,
             )
@@ -291,13 +291,13 @@ class RobotControllerTest(unittest.TestCase):
         )
         self.assertEqual(controller._vanish_sequence.phase, "idle")
 
-    def test_compute_targets_holds_current_targets_when_ik_fails(self) -> None:
+    def test_next_targets_holds_current_targets_when_ik_fails(self) -> None:
         controller = RobotController(SimpleNamespace())
         controller.ik = _FailingIK()
-        controller.escape_controller = _FakeEscape()
+        controller.escape = _FakeEscape()
 
-        with self.assertLogs("core.app.controller", level="WARNING"):
-            targets = controller.compute_targets(
+        with self.assertLogs("core.app.robot_controller", level="WARNING"):
+            targets = controller.next_targets(
                 hand=Hand(detected=True, x=320.0, y=240.0, confidence=1.0),
                 motor_state=_motor_state(),
             )
@@ -313,7 +313,7 @@ class RobotControllerTest(unittest.TestCase):
         )
 
     def test_ik_limits_are_derived_from_motor_manager_state(self) -> None:
-        config = build_ik_config(
+        config = ik_config_from_motors(
             {
                 "m1": {"min_angle": -10.0, "max_angle": 10.0},
                 "m2": {"min_angle": 30.0, "max_angle": 120.0},
@@ -363,11 +363,11 @@ class _FakeEscape:
     def __init__(self) -> None:
         self.last_current_xyz = None
 
-    def compute_next_xyz(self, *, hand_robot_yz, current_xyz_cm, dt):
+    def step(self, *, hand_robot_yz, current_xyz_cm, dt):
         self.last_current_xyz = current_xyz_cm
         return SimpleNamespace(
             next_xyz_cm=XYZPosition(x_cm=current_xyz_cm.x_cm, y_cm=4.0, z_cm=5.0),
-            lab_state="NORMAL_ESCAPE",
+            escape_state="NORMAL_ESCAPE",
             status="fake",
             visible=True,
             planned_landing_xyz_cm=None,
@@ -378,10 +378,10 @@ class _InvisibleEscape:
     def __init__(self) -> None:
         self.landing_xyz = XYZPosition(x_cm=100.0, y_cm=6.0, z_cm=7.0)
 
-    def compute_next_xyz(self, *, hand_robot_yz, current_xyz_cm, dt):
+    def step(self, *, hand_robot_yz, current_xyz_cm, dt):
         return SimpleNamespace(
             next_xyz_cm=current_xyz_cm,
-            lab_state="BOUNDARY_ESCAPE",
+            escape_state="BOUNDARY_ESCAPE",
             status="vanished",
             visible=False,
             planned_landing_xyz_cm=self.landing_xyz,
@@ -390,7 +390,7 @@ class _InvisibleEscape:
 
 class _FakeIK:
     def __init__(self) -> None:
-        self.config = build_ik_config(_motor_state()["motors"])
+        self.config = ik_config_from_motors(_motor_state()["motors"])
         self.last_fk_angles = None
         self.last_solve_target = None
 

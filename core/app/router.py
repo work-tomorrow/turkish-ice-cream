@@ -7,7 +7,6 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi import WebSocketDisconnect
 from pydantic import ValidationError
 
-from core.app.controller import REACHABLE_ERROR_THRESHOLD_CM
 from core.app.models import (
     CircleDemoResponse,
     HandDetectionResult,
@@ -85,27 +84,10 @@ def _circle_demo_targets(
     z_cm: float,
     update_ik_state: bool,
 ) -> tuple[dict[str, float] | None, float | None]:
-    controller = app.state.controller
-    motor_state = app.state.motor_manager.get_state()
-    controller._sync_ik_limits(motor_state)
-    current_targets = controller._current_motor_targets(motor_state)
-
-    ik_result = controller.ik.solve_xyz(
-        target_x_cm=0.0,
-        target_y_cm=y_cm,
-        target_z_cm=z_cm,
-        update_state=update_ik_state,
-        reachable_error_threshold_cm=REACHABLE_ERROR_THRESHOLD_CM,
-    )
-    if not ik_result.reachable:
-        return None, ik_result.error_cm
-
-    return (
-        controller._joint_targets_to_motor_targets(
-            ik_result.motor_targets(),
-            base_targets=current_targets,
-        ),
-        ik_result.error_cm,
+    return app.state.controller.circle_demo_targets(
+        y_cm=y_cm,
+        z_cm=z_cm,
+        update_ik_state=update_ik_state,
     )
 
 

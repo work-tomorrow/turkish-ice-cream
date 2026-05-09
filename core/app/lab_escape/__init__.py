@@ -1,8 +1,9 @@
-from core.app.lab_escape.common import LabEscapeConfig, Rect, Vec2, WorldConfig
-from core.app.lab_escape.state_machine import ArmStateMachine
+from core.app.lab_escape.common import EscapeState, LabEscapeConfig, Rect, Vec2, WorldConfig
+from core.app.lab_escape.machine import EscapeStateMachine
 
 __all__ = [
-    "ArmStateMachine",
+    "EscapeState",
+    "EscapeStateMachine",
     "LabEscapeConfig",
     "Rect",
     "Vec2",

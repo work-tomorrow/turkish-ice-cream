@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import core.app.main as core_main
 from core.app import router
-from core.app.controller import RobotController
 from core.app.main import app
 from core.app.models import (
     Hand,
@@ -15,6 +14,7 @@ from core.app.models import (
     MotorJogRequest,
     RobotState,
 )
+from core.app.robot_controller import RobotController
 from core.app.vision_state import (
     apply_hand_detection,
     mark_vision_disconnected,

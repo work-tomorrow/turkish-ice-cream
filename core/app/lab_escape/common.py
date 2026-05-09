@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 
 
-class RobotState(Enum):
+class EscapeState(Enum):
     IDLE = auto()
     NORMAL_ESCAPE = auto()
     BOUNDARY_ESCAPE = auto()
@@ -82,7 +82,7 @@ class AlgoResult:
 
 @dataclass(frozen=True)
 class StateDecision:
-    next_state: RobotState
+    next_state: EscapeState
     reason: str
 
 

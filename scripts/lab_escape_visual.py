@@ -34,7 +34,7 @@ import sys
 import time
 
 from core.app.lab_escape.common import LabEscapeConfig, Vec2
-from core.app.lab_escape.state_machine import ArmStateMachine
+from core.app.lab_escape.machine import EscapeStateMachine
 
 
 RENDER_DT_S = 1.0 / 60.0
@@ -86,7 +86,7 @@ class LabEscapeVisualTk:
     def __init__(self, root: tk.Tk, world: LabEscapeConfig) -> None:
         self.root = root
         self.world = world
-        self.sm = ArmStateMachine(world)
+        self.sm = EscapeStateMachine(world)
 
         self.ice = Vec2(0.0, 0.0)
         self.hand: Vec2 | None = None
@@ -185,13 +185,13 @@ class LabEscapeVisualTk:
 
     def _reset_ice(self, _event: tk.Event | None = None) -> None:
         self.ice = Vec2(0.0, 0.0)
-        self.sm = ArmStateMachine(self.world)
+        self.sm = EscapeStateMachine(self.world)
         self.next_control_time = time.monotonic()
         self.last_result = None
 
     def _toggle_close(self, _event: tk.Event | None = None) -> None:
         self.world.enable_close_retreat = not self.world.enable_close_retreat
-        self.sm = ArmStateMachine(self.world)
+        self.sm = EscapeStateMachine(self.world)
         self.next_control_time = time.monotonic()
         self.last_result = None
 
@@ -367,7 +367,7 @@ class LabEscapeVisualMpl:
         self._Rectangle = Rectangle
 
         self.world = world
-        self.sm = ArmStateMachine(world)
+        self.sm = EscapeStateMachine(world)
         self.ice = Vec2(0.0, 0.0)
         self.hand: Vec2 | None = None
         self.mouse_in_workspace = False
@@ -507,12 +507,12 @@ class LabEscapeVisualMpl:
     def _on_key(self, event) -> None:
         if event.key in ("r", "R"):
             self.ice = Vec2(0.0, 0.0)
-            self.sm = ArmStateMachine(self.world)
+            self.sm = EscapeStateMachine(self.world)
             self.next_control_time = time.monotonic()
             self.last_result = None
         elif event.key in ("c", "C"):
             self.world.enable_close_retreat = not self.world.enable_close_retreat
-            self.sm = ArmStateMachine(self.world)
+            self.sm = EscapeStateMachine(self.world)
             self.next_control_time = time.monotonic()
             self.last_result = None
         elif event.key in ("q", "Q"):

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.app.lab_escape.common import LabEscapeConfig, Vec2, clamp, move_toward
-from core.app.lab_escape.state_machine import ArmStateMachine
+from core.app.lab_escape.machine import EscapeStateMachine
 
 
 @dataclass(frozen=True)
@@ -19,21 +19,18 @@ class YZPosition:
     z_cm: float
 
 
-LabEscapeControllerConfig = LabEscapeConfig
-
-
 @dataclass(frozen=True)
-class LabEscapeControllerResult:
+class EscapeStep:
     next_xyz_cm: XYZPosition
     status: str
-    lab_state: str
+    escape_state: str
     transition_reason: str
-    hand_lab_pos: tuple[float, float] | None
+    hand_yz_cm: tuple[float, float] | None
     visible: bool
     planned_landing_xyz_cm: XYZPosition | None = None
 
 
-class LabEscapeController:
+class EscapeController:
     """Adapter around the smooth-only lab escape state machine.
 
     Robot frame:
@@ -42,28 +39,28 @@ class LabEscapeController:
     - z = up/down
     """
 
-    def __init__(self, config: LabEscapeControllerConfig | None = None) -> None:
-        self.config = config or LabEscapeControllerConfig()
-        self.state_machine = ArmStateMachine(self.config)
-        self._last_result: LabEscapeControllerResult | None = None
+    def __init__(self, config: LabEscapeConfig | None = None) -> None:
+        self.config = config or LabEscapeConfig()
+        self.machine = EscapeStateMachine(self.config)
+        self._last_step: EscapeStep | None = None
 
     def reset(self) -> None:
-        self.state_machine = ArmStateMachine(self.config)
-        self._last_result = None
+        self.machine = EscapeStateMachine(self.config)
+        self._last_step = None
 
-    def compute_next_xyz(
+    def step(
         self,
         *,
         hand_robot_yz: YZPosition | None,
         current_xyz_cm: XYZPosition,
         dt: float,
-    ) -> LabEscapeControllerResult:
+    ) -> EscapeStep:
         current_lab_pos = self._robot_yz_to_lab_vec(YZPosition(current_xyz_cm.y_cm, current_xyz_cm.z_cm))
-        hand_lab_pos = self._robot_yz_to_lab_vec(hand_robot_yz) if hand_robot_yz is not None else None
+        hand_vec = self._robot_yz_to_lab_vec(hand_robot_yz) if hand_robot_yz is not None else None
 
-        algo_result = self.state_machine.update(
+        algo_result = self.machine.update(
             ice_pos=current_lab_pos,
-            hand_pos=hand_lab_pos,
+            hand_pos=hand_vec,
             dt=max(float(dt), 1e-3),
         )
 
@@ -87,21 +84,21 @@ class LabEscapeController:
             else None
         )
 
-        result = LabEscapeControllerResult(
+        result = EscapeStep(
             next_xyz_cm=next_xyz,
             status=algo_result.status,
-            lab_state=self.state_machine.state.name,
-            transition_reason=self.state_machine.transition_reason,
-            hand_lab_pos=self._vec_tuple(hand_lab_pos),
+            escape_state=self.machine.state.name,
+            transition_reason=self.machine.transition_reason,
+            hand_yz_cm=self._vec_tuple(hand_vec),
             visible=bool(algo_result.visible),
             planned_landing_xyz_cm=planned_landing_xyz,
         )
-        self._last_result = result
+        self._last_step = result
         return result
 
     @property
-    def last_result(self) -> LabEscapeControllerResult | None:
-        return self._last_result
+    def last_step(self) -> EscapeStep | None:
+        return self._last_step
 
     def _robot_yz_to_lab_vec(self, position: YZPosition) -> Vec2:
         y_cm = clamp(position.y_cm, self.config.target_y_min_cm, self.config.target_y_max_cm)

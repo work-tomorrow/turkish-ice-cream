@@ -16,7 +16,7 @@ from core.app.lab_escape.common import (
     RETREAT_BORDER_COLOR,
     RETREAT_COLOR,
     AlgoResult,
-    RobotState,
+    EscapeState,
     Vec2,
     WorldConfig,
     clamp,
@@ -264,12 +264,12 @@ class SmoothBlindVectorEscapeAlgo(BaseAlgo):
         return AlgoResult(next_pos, BLIND_COLOR, BLIND_BORDER_COLOR, "BLIND / smooth vector escape")
 
 
-def create_algorithms() -> dict[RobotState, BaseAlgo]:
+def build_algorithms() -> dict[EscapeState, BaseAlgo]:
     """Single smooth-only algorithm set. No profiles, no eight-direction variants."""
     return {
-        RobotState.IDLE: SmoothIdleAlgo(),
-        RobotState.NORMAL_ESCAPE: SmoothMomentumEscapeAlgo(),
-        RobotState.BOUNDARY_ESCAPE: SmoothBoundaryCenterPullAlgo(),
-        RobotState.CLOSE_RETREAT: SmoothCloseRetreatAlgo(),
-        RobotState.BLIND_SPOT_ESCAPE: SmoothBlindVectorEscapeAlgo(),
+        EscapeState.IDLE: SmoothIdleAlgo(),
+        EscapeState.NORMAL_ESCAPE: SmoothMomentumEscapeAlgo(),
+        EscapeState.BOUNDARY_ESCAPE: SmoothBoundaryCenterPullAlgo(),
+        EscapeState.CLOSE_RETREAT: SmoothCloseRetreatAlgo(),
+        EscapeState.BLIND_SPOT_ESCAPE: SmoothBlindVectorEscapeAlgo(),
     }

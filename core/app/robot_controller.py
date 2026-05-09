@@ -4,13 +4,9 @@ import logging
 import math
 
 from core.app.config import settings
+from core.app.escape_controller import EscapeController, XYZPosition, YZPosition
 from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit, clamp
-from core.app.lab_escape_controller import (
-    LabEscapeController,
-    LabEscapeControllerConfig,
-    XYZPosition,
-    YZPosition,
-)
+from core.app.lab_escape.common import LabEscapeConfig
 from core.app.models import Hand, RobotState
 
 logger = logging.getLogger(__name__)
@@ -76,9 +72,9 @@ class CameraCalibrationConfig:
     min_hand_confidence: float = 0.2
 
     @classmethod
-    def from_lab_config(
+    def from_escape_config(
         cls,
-        config: LabEscapeControllerConfig,
+        config: LabEscapeConfig,
     ) -> "CameraCalibrationConfig":
         return cls(
             y_from_pixel_x=AffineAxisCalibration.from_points(
@@ -106,7 +102,7 @@ class VanishSequence:
     landing_targets: dict[str, float] | None = None
 
 
-def compute_motion_cycles(
+def motion_cycles(
     *,
     start_targets: dict[str, float],
     target_targets: dict[str, float],
@@ -132,9 +128,9 @@ def compute_motion_cycles(
     return max(cycles, 1)
 
 
-def build_default_ik_helper() -> ArmIKHelper:
+def default_ik_helper() -> ArmIKHelper:
     return ArmIKHelper(
-        build_ik_config(
+        ik_config_from_motors(
             {
                 "m1": {"min_angle": -45.0, "max_angle": 45.0},
                 "m2": {"min_angle": 45.0, "max_angle": 135.0},
@@ -145,7 +141,7 @@ def build_default_ik_helper() -> ArmIKHelper:
     )
 
 
-def build_ik_config(motors: dict) -> ArmIKConfig:
+def ik_config_from_motors(motors: dict) -> ArmIKConfig:
     return ArmIKConfig(
         max_extra_pitch_deg=12.0,
         max_extra_yaw_deg=10.0,
@@ -173,12 +169,12 @@ def _joint_limit_from_motor_state(joint: str, motor_state: dict) -> JointLimit:
 class RobotController:
     def __init__(self, app):
         self.app = app
-        escape_config = LabEscapeControllerConfig()
-        self.escape_controller = LabEscapeController(escape_config)
-        self.camera_calibration = CameraCalibrationConfig.from_lab_config(
+        escape_config = LabEscapeConfig()
+        self.escape = EscapeController(escape_config)
+        self.camera_calibration = CameraCalibrationConfig.from_escape_config(
             escape_config,
         )
-        self.ik = build_default_ik_helper()
+        self.ik = default_ik_helper()
         self.vanish_motor_targets = dict(settings.vanish_motor_targets)
         self._vanish_sequence = VanishSequence()
         self._was_started = False
@@ -187,7 +183,7 @@ class RobotController:
         while True:
             if self.app.state.robot_state is not RobotState.started:
                 if self._was_started:
-                    self.escape_controller.reset()
+                    self.escape.reset()
                     self.ik.reset()
                     self._reset_vanish_sequence()
                     self._was_started = False
@@ -210,16 +206,16 @@ class RobotController:
 
         motor_state = motor_manager.get_state()
 
-        targets = self.compute_targets(
+        targets = self.next_targets(
             hand=hand,
             motor_state=motor_state,
         )
 
         motor_manager.set_target(targets)
 
-    def compute_targets(self, *, hand: Hand, motor_state: dict) -> dict[str, float]:
+    def next_targets(self, *, hand: Hand, motor_state: dict) -> dict[str, float]:
         self._sync_ik_limits(motor_state)
-        current_targets = self._current_motor_targets(motor_state)
+        current_targets = self._motor_targets(motor_state)
 
         if self._vanish_sequence.phase != VANISH_PHASE_IDLE:
             return self._run_vanish_sequence(
@@ -230,7 +226,7 @@ class RobotController:
         current_xyz = self._current_xyz(motor_state)
         hand_robot_yz = self._calibrate_hand_yz(hand)
 
-        result = self.escape_controller.compute_next_xyz(
+        result = self.escape.step(
             hand_robot_yz=hand_robot_yz,
             current_xyz_cm=current_xyz,
             dt=float(motor_state.get("dt_s", CONTROL_INTERVAL_SECONDS)),
@@ -242,26 +238,52 @@ class RobotController:
                 current_targets=current_targets,
                 motor_state=motor_state,
             )
-            return self._run_vanish_sequence(
-                current_targets=current_targets,
-                motor_state=motor_state,
-            )
+            return self._run_vanish_sequence(current_targets=current_targets, motor_state=motor_state)
 
-        targets = self._targets_for_xyz(
+        targets = self._motor_targets_for_xyz(
             result.next_xyz_cm,
             current_targets=current_targets,
             status=result.status,
-            lab_state=result.lab_state,
+            escape_state=result.escape_state,
         )
         return targets if targets is not None else current_targets
 
-    def _targets_for_xyz(
+    def circle_demo_targets(
+        self,
+        *,
+        y_cm: float,
+        z_cm: float,
+        update_ik_state: bool,
+    ) -> tuple[dict[str, float] | None, float | None]:
+        motor_state = self.app.state.motor_manager.get_state()
+        self._sync_ik_limits(motor_state)
+        current_targets = self._motor_targets(motor_state)
+
+        ik_result = self.ik.solve_xyz(
+            target_x_cm=0.0,
+            target_y_cm=y_cm,
+            target_z_cm=z_cm,
+            update_state=update_ik_state,
+            reachable_error_threshold_cm=REACHABLE_ERROR_THRESHOLD_CM,
+        )
+        if not ik_result.reachable:
+            return None, ik_result.error_cm
+
+        return (
+            self._joint_targets_to_motor_targets(
+                ik_result.motor_targets(),
+                base_targets=current_targets,
+            ),
+            ik_result.error_cm,
+        )
+
+    def _motor_targets_for_xyz(
         self,
         xyz: XYZPosition,
         *,
         current_targets: dict[str, float],
         status: str,
-        lab_state: str,
+        escape_state: str,
     ) -> dict[str, float] | None:
         try:
             ik_result = self.ik.solve_xyz(
@@ -275,7 +297,7 @@ class RobotController:
             self.ik.reset()
             logger.debug(
                 "escape controller held targets: state=%s xyz=(%.2f, %.2f, %.2f) status=%s error=%s",
-                lab_state,
+                escape_state,
                 xyz.x_cm,
                 xyz.y_cm,
                 xyz.z_cm,
@@ -301,7 +323,7 @@ class RobotController:
         )
         logger.debug(
             "escape controller: state=%s xyz=(%.2f, %.2f, %.2f) reachable=%s err=%.2f status=%s",
-            lab_state,
+            escape_state,
             xyz.x_cm,
             xyz.y_cm,
             xyz.z_cm,
@@ -358,11 +380,11 @@ class RobotController:
                 return current_targets
 
             if sequence.landing_targets is None:
-                landing_targets = self._targets_for_xyz(
+                landing_targets = self._motor_targets_for_xyz(
                     sequence.landing_xyz_cm,
                     current_targets=current_targets,
                     status="vanish landing",
-                    lab_state="BOUNDARY_ESCAPE",
+                    escape_state="BOUNDARY_ESCAPE",
                 )
                 if landing_targets is None:
                     logger.warning(
@@ -410,7 +432,7 @@ class RobotController:
         target_targets: dict[str, float],
         motor_state: dict,
     ) -> int:
-        return compute_motion_cycles(
+        return motion_cycles(
             start_targets=start_targets,
             target_targets=target_targets,
             max_velocity_deg_s={
@@ -452,7 +474,7 @@ class RobotController:
         ):
             return
 
-        next_config = build_ik_config(motors)
+        next_config = ik_config_from_motors(motors)
         current_config = getattr(self.ik, "config", None)
         if (
             current_config is not None
@@ -492,7 +514,7 @@ class RobotController:
         return targets
 
     @staticmethod
-    def _current_motor_targets(motor_state: dict) -> dict[str, float]:
+    def _motor_targets(motor_state: dict) -> dict[str, float]:
         current_targets = motor_state.get("current_targets")
         if current_targets:
             return {

@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.app.config import settings
-from core.app.controller import RobotController
+from core.app.robot_controller import RobotController
 from core.app.models import Hand, RobotState
 from core.app.router import api_router
 from core.app.vision_state import vision_stale_monitor

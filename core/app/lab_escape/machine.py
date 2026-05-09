@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from core.app.lab_escape.algo_variants import create_algorithms
+from core.app.lab_escape.algorithms import build_algorithms
 from core.app.lab_escape.common import (
-    RobotState,
+    EscapeState,
     StateDecision,
     Vec2,
     WorldConfig,
@@ -11,7 +11,7 @@ from core.app.lab_escape.common import (
 )
 
 
-class ArmStateMachine:
+class EscapeStateMachine:
     """Smooth-only state machine.
 
     States decide *when* to use a behavior. The behavior itself is always the smooth algorithm set.
@@ -20,7 +20,7 @@ class ArmStateMachine:
 
     def __init__(self, config: WorldConfig):
         self.config = config
-        self.state = RobotState.IDLE
+        self.state = EscapeState.IDLE
         self.state_time = 0.0
         self.transition_reason = "init"
 
@@ -30,22 +30,22 @@ class ArmStateMachine:
         self.hand_speed = 0.0
         self.hand_velocity = Vec2(0.0, 0.0)
 
-        self.algorithms = create_algorithms()
+        self.algorithms = build_algorithms()
 
         self.min_state_duration = {
-            RobotState.IDLE: 0.0,
-            RobotState.NORMAL_ESCAPE: 0.12,
-            RobotState.BOUNDARY_ESCAPE: 0.25,
-            RobotState.CLOSE_RETREAT: 0.0,
-            RobotState.BLIND_SPOT_ESCAPE: 0.20,
+            EscapeState.IDLE: 0.0,
+            EscapeState.NORMAL_ESCAPE: 0.12,
+            EscapeState.BOUNDARY_ESCAPE: 0.25,
+            EscapeState.CLOSE_RETREAT: 0.0,
+            EscapeState.BLIND_SPOT_ESCAPE: 0.20,
         }
 
         self.state_priority = {
-            RobotState.IDLE: 0,
-            RobotState.NORMAL_ESCAPE: 10,
-            RobotState.BLIND_SPOT_ESCAPE: 15,
-            RobotState.BOUNDARY_ESCAPE: 20,
-            RobotState.CLOSE_RETREAT: 30,
+            EscapeState.IDLE: 0,
+            EscapeState.NORMAL_ESCAPE: 10,
+            EscapeState.BLIND_SPOT_ESCAPE: 15,
+            EscapeState.BOUNDARY_ESCAPE: 20,
+            EscapeState.CLOSE_RETREAT: 30,
         }
 
     def update(self, ice_pos: Vec2, hand_pos: Vec2 | None, dt: float):
@@ -95,41 +95,41 @@ class ArmStateMachine:
         self.time_since_hand_seen = 0.0
 
     def _decide_next_state(self, ice_pos: Vec2, hand_pos: Vec2 | None) -> StateDecision:
-        close_algo = self.algorithms[RobotState.CLOSE_RETREAT]
+        close_algo = self.algorithms[EscapeState.CLOSE_RETREAT]
         if getattr(close_algo, "is_active", False):
-            return StateDecision(RobotState.CLOSE_RETREAT, "keep CLOSE_RETREAT until animation finishes")
+            return StateDecision(EscapeState.CLOSE_RETREAT, "keep CLOSE_RETREAT until animation finishes")
 
         if hand_pos is None:
             if self._should_use_blind_spot_escape():
-                return StateDecision(RobotState.BLIND_SPOT_ESCAPE, "hand lost near blind zone")
-            if self.state == RobotState.BOUNDARY_ESCAPE and not self._safe_from_boundary(ice_pos):
-                return StateDecision(RobotState.BOUNDARY_ESCAPE, "keep BOUNDARY_ESCAPE until safely away from boundary")
-            return StateDecision(RobotState.IDLE, "no hand observed")
+                return StateDecision(EscapeState.BLIND_SPOT_ESCAPE, "hand lost near blind zone")
+            if self.state == EscapeState.BOUNDARY_ESCAPE and not self._safe_from_boundary(ice_pos):
+                return StateDecision(EscapeState.BOUNDARY_ESCAPE, "keep BOUNDARY_ESCAPE until safely away from boundary")
+            return StateDecision(EscapeState.IDLE, "no hand observed")
 
         hand_ice_distance = distance(ice_pos, hand_pos)
 
         if self.config.enable_close_retreat and hand_ice_distance <= self.config.close_retreat_distance_cm:
             return StateDecision(
-                RobotState.CLOSE_RETREAT,
+                EscapeState.CLOSE_RETREAT,
                 f"hand too close: {hand_ice_distance:.1f} <= {self.config.close_retreat_distance_cm:.1f}",
             )
 
-        if self.state == RobotState.BOUNDARY_ESCAPE and not self._safe_from_boundary(ice_pos):
-            return StateDecision(RobotState.BOUNDARY_ESCAPE, "keep BOUNDARY_ESCAPE until safely away from boundary")
+        if self.state == EscapeState.BOUNDARY_ESCAPE and not self._safe_from_boundary(ice_pos):
+            return StateDecision(EscapeState.BOUNDARY_ESCAPE, "keep BOUNDARY_ESCAPE until safely away from boundary")
 
         if self._near_boundary(ice_pos):
-            return StateDecision(RobotState.BOUNDARY_ESCAPE, "ice is near workspace boundary")
+            return StateDecision(EscapeState.BOUNDARY_ESCAPE, "ice is near workspace boundary")
 
         if hand_ice_distance <= self.config.escape_trigger_distance_cm:
             return StateDecision(
-                RobotState.NORMAL_ESCAPE,
+                EscapeState.NORMAL_ESCAPE,
                 f"hand inside escape trigger distance: {hand_ice_distance:.1f} <= {self.config.escape_trigger_distance_cm:.1f}",
             )
 
         if self.hand_speed > self.config.hand_stationary_speed_cm_s and self._hand_is_moving_toward_ice(ice_pos, hand_pos):
-            return StateDecision(RobotState.NORMAL_ESCAPE, "hand is moving toward ice")
+            return StateDecision(EscapeState.NORMAL_ESCAPE, "hand is moving toward ice")
 
-        return StateDecision(RobotState.IDLE, "hand is far or not approaching")
+        return StateDecision(EscapeState.IDLE, "hand is far or not approaching")
 
     def _apply_transition_guard(self, decision: StateDecision) -> StateDecision:
         if decision.next_state == self.state:
