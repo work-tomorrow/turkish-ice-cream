@@ -105,8 +105,8 @@ class ArmIKConfig:
     joint_signs: dict[str, float] = field(
         default_factory=lambda: {
             "J1": 1.0,
-            "J2": 1.0,
-            "J3": 1.0,
+            "J2": -1.0,
+            "J3": -1.0,
             "J4": -1.0,
         }
     )
