@@ -24,9 +24,9 @@ MOTOR_ID_TO_JOINT = {motor_id: joint for joint, motor_id in JOINT_TO_MOTOR_ID.it
 
 JOINT_MODEL_CALIBRATION = {
     "J1": {"sign": 1.0, "zero_deg": 0.0},
-    "J2": {"sign": -1.0, "zero_deg": 90.0},
-    "J3": {"sign": 1.0, "zero_deg": 90.0},
-    "J4": {"sign": 1.0, "zero_deg": 90.0},
+    "J2": {"sign": 1.0, "zero_deg": 0.0},
+    "J3": {"sign": 1.0, "zero_deg": 0.0},
+    "J4": {"sign": -1.0, "zero_deg": 0.0},
 }
 
 
@@ -238,7 +238,9 @@ class RobotController:
                 current_targets=current_targets,
                 motor_state=motor_state,
             )
-            return self._run_vanish_sequence(current_targets=current_targets, motor_state=motor_state)
+            return self._run_vanish_sequence(
+                current_targets=current_targets, motor_state=motor_state
+            )
 
         targets = self._motor_targets_for_xyz(
             result.next_xyz_cm,
@@ -525,8 +527,7 @@ class RobotController:
         current_targets = motor_state.get("current_targets")
         if current_targets:
             return {
-                motor_id: float(target)
-                for motor_id, target in current_targets.items()
+                motor_id: float(target) for motor_id, target in current_targets.items()
             }
 
         motors = motor_state.get("motors", {})
