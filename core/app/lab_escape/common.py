@@ -112,8 +112,8 @@ class LabEscapeConfig:
     ice_radius_cm: float = 2.0
 
     # State thresholds. These are the main knobs you are expected to tune.
-    escape_trigger_distance_cm: float = 14.0
-    close_retreat_distance_cm: float = 8.0
+    escape_trigger_distance_cm: float = 8.0
+    close_retreat_distance_cm: float = 3.0
     boundary_enter_margin_cm: float = 2.0
     boundary_exit_margin_cm: float = 5.0
     enable_close_retreat: bool = True
@@ -125,8 +125,8 @@ class LabEscapeConfig:
 
     # Motion speeds in the lab YZ plane.
     normal_speed_cm_s: float = 50.0
-    boundary_speed_cm_s: float = 80.0
-    retreat_speed_cm_s: float = 100.0
+    boundary_speed_cm_s: float = 50.0
+    retreat_speed_cm_s: float = 50.0
     idle_speed_cm_s: float = 10.0
 
     blind_zone: Rect | None = None
