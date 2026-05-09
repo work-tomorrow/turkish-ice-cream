@@ -60,7 +60,6 @@ class ServoMotor:
         self.moving = False
         self.ready = True
         self.last_error: str | None = None
-        self.stopped = False
 
         self._min_pulse_us = min_pulse_us
         self._max_pulse_us = max_pulse_us
@@ -72,9 +71,6 @@ class ServoMotor:
         self._pwm.start(0)
 
     def move_to(self, angle: float, *, duration_ms: int = 0) -> None:
-        if self.stopped:
-            return
-
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
         duty = self._angle_to_duty(angle)
 
@@ -94,11 +90,12 @@ class ServoMotor:
         self.move_to(self.home_angle)
 
     def stop_now(self) -> None:
-        self.stopped = True
+        self.target_angle = self.current_angle
+        self.moving = False
         self.release()
 
     def clear_stop(self) -> None:
-        self.stopped = False
+        pass
 
     def release(self) -> None:
         self._pwm.ChangeDutyCycle(0)
@@ -162,7 +159,6 @@ class StepperMotor:
         self.moving = False
         self.ready = True
         self.last_error: str | None = None
-        self.stopped = False
 
         self._steps_per_rev = steps_per_rev
         self._microsteps = microsteps
@@ -186,8 +182,6 @@ class StepperMotor:
         self._thread.start()
 
     def move_to(self, angle: float, *, duration_ms: int = 0) -> None:
-        if self.stopped:
-            return
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
         self.target_angle = angle
         self._target_steps = self._angle_to_steps(angle)
@@ -197,11 +191,12 @@ class StepperMotor:
         self.move_to(self.home_angle)
 
     def stop_now(self) -> None:
-        self.stopped = True
+        self.target_angle = self.current_angle
+        self._target_steps = self._current_steps
         self.moving = False
 
     def clear_stop(self) -> None:
-        self.stopped = False
+        pass
 
     def snapshot(self) -> MotorState:
         return MotorState(
@@ -227,7 +222,7 @@ class StepperMotor:
 
     def _loop(self) -> None:
         while not self._stop_thread.is_set():
-            if self.stopped or self._current_steps == self._target_steps:
+            if self._current_steps == self._target_steps:
                 self.moving = False
                 time.sleep(0.002)
                 continue

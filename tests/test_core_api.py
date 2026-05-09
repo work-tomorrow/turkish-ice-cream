@@ -134,13 +134,40 @@ class CoreApiMotorTest(unittest.TestCase):
             payload = response.model_dump()
             self.assertEqual(payload["action"]["current_angle"], 3.0)
 
+    def test_emergency_stop_is_instant_stop_not_latched(self) -> None:
+        with _request_context() as request:
+            asyncio.run(
+                router.jog_motor(
+                    "m3",
+                    MotorJogRequest(
+                        direction=MotorDirection.positive,
+                        step_degrees=3,
+                    ),
+                    request,
+                )
+            )
+
+            asyncio.run(router.set_emergency_stop(request))
+            response = asyncio.run(
+                router.jog_motor(
+                    "m3",
+                    MotorJogRequest(
+                        direction=MotorDirection.positive,
+                        step_degrees=3,
+                    ),
+                    request,
+                )
+            )
+
+            payload = response.model_dump()
+            self.assertEqual(payload["action"]["current_angle"], 96.0)
+
 
 class _request_context:
     def __enter__(self):
         self.motor_manager = MotorManager(motors=build_mock_motors())
         state = SimpleNamespace(
             running=False,
-            emergency_stopped=False,
             robot_state=RobotState.idle,
             tease_count=0,
             max_tease=10,

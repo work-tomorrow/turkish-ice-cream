@@ -75,16 +75,20 @@ class MotorManagerTest(unittest.TestCase):
         self.assertEqual(state["motors"]["m3"]["target_angle"], -18.0)
         self.assertEqual(state["motors"]["m4"]["target_angle"], 90.0)
 
-    def test_emergency_stop_blocks_future_commands_until_cleared(self) -> None:
+    def test_emergency_stop_freezes_pose_but_next_command_can_continue(self) -> None:
+        self.manager.set_target_angles(
+            {"m1": 4.5, "m2": -4.5, "m3": 108.0, "m4": 72.0}
+        )
         self.manager.emergency_stop()
+        state = self.manager.get_state()
 
-        with self.assertRaises(RuntimeError):
-            self.manager.set_target_angles(
-                {"m1": 0.0, "m2": 0.0, "m3": 90.0, "m4": 90.0}
-            )
+        self.assertEqual(state["current_targets"]["m1"], 4.5)
+        self.assertEqual(state["current_targets"]["m3"], 108.0)
 
-        self.manager.clear_emergency_stop()
         self.manager.set_target_angles({"m1": 0.0, "m2": 0.0, "m3": 90.0, "m4": 90.0})
+        state = self.manager.get_state()
+        self.assertEqual(state["motors"]["m1"]["current_angle"], 0.0)
+        self.assertEqual(state["motors"]["m3"]["current_angle"], 90.0)
 
     def test_set_current_angle_zero_redefines_future_logical_angles(self) -> None:
         self.manager.set_target_angles({"m1": 0.0, "m2": 0.0, "m3": 108.0, "m4": 90.0})

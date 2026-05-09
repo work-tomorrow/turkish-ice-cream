@@ -48,7 +48,6 @@ class MotorManager:
             raise ValueError("MotorManager needs at least one motor")
 
         self.dt_s = float(dt_s)
-        self.emergency_stopped = False
 
         # Default speed limits.
         # You can tune these later based on the real robot.
@@ -89,9 +88,6 @@ class MotorManager:
                 "m4": 90,
             }
         """
-
-        if self.emergency_stopped:
-            raise RuntimeError("Emergency stop is active")
 
         self._check_motor_ids(targets)
 
@@ -145,9 +141,6 @@ class MotorManager:
     def home_all(self) -> None:
         """Move all motors to their home angle."""
 
-        if self.emergency_stopped:
-            raise RuntimeError("Emergency stop is active")
-
         targets = {}
         for motor_id, motor in self.motors.items():
             home_angle = float(getattr(motor, "home_angle", 0.0))
@@ -156,24 +149,17 @@ class MotorManager:
         self.set_target_angles(targets)
 
     def emergency_stop(self) -> None:
-        """Immediately stop all motors and block future movement commands."""
+        """Immediately stop all motors and freeze targets at the current pose."""
 
-        self.emergency_stopped = True
-
-        for motor in self.motors.values():
+        for motor_id, motor in self.motors.items():
             if hasattr(motor, "stop_now"):
                 motor.stop_now()
             elif hasattr(motor, "stop"):
                 motor.stop()
+            self.current_targets[motor_id] = self._logical_current_angle(motor_id, motor)
 
     def clear_emergency_stop(self) -> None:
-        """Allow motors to move again after emergency_stop()."""
-
-        self.emergency_stopped = False
-
-        for motor in self.motors.values():
-            if hasattr(motor, "clear_stop"):
-                motor.clear_stop()
+        """Compatibility no-op for the old clear operation."""
 
     def reset_emergency_stop(self) -> None:
         """Alias for clear_emergency_stop()."""
@@ -184,7 +170,7 @@ class MotorManager:
         """Return simple manager + motor state."""
 
         return {
-            "emergency_stopped": self.emergency_stopped,
+            "emergency_stopped": False,
             "dt_s": self.dt_s,
             "current_targets": dict(self.current_targets),
             "motors": {
@@ -278,6 +264,10 @@ class MotorManager:
             normalized["max_angle"] = float(max_angle) - offset
 
         return normalized
+
+    def _logical_current_angle(self, motor_id: str, motor: Any) -> float:
+        current_angle = float(getattr(motor, "current_angle", 0.0))
+        return current_angle - self.zero_offsets[motor_id]
 
     @staticmethod
     def _clamp(value: float, lo: float, hi: float) -> float:

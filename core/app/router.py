@@ -51,8 +51,8 @@ def _status_payload(request: Request | WebSocket) -> StatusResponse:
     hand = request.app.state.hand
     return StatusResponse(
         system=StatusSystem(
-            ready=not request.app.state.emergency_stopped,
-            emergency_stopped=request.app.state.emergency_stopped,
+            ready=True,
+            emergency_stopped=False,
         ),
         robot=StatusRobot(state=request.app.state.robot_state),
         vision=StatusVision(hand_detected=hand.detected, hand=hand),
@@ -77,8 +77,7 @@ def _session_summary(request: Request) -> SessionSummary:
 
 
 def _ensure_not_emergency_stopped(request: Request) -> None:
-    if request.app.state.emergency_stopped:
-        raise HTTPException(status_code=423, detail="Emergency stop is active")
+    return
 
 
 def _ensure_motor_id(motor_id: str) -> None:
@@ -318,15 +317,13 @@ async def get_session(request: Request) -> SessionResponse:
     tags=["emergency-stop"],
 )
 async def set_emergency_stop(request: Request) -> EmergencyStopSetResponse:
-    """Activate emergency stop and halt the current demo session."""
+    """Immediately stop all motors without creating a blocked state."""
     request.app.state.running = False
-    request.app.state.emergency_stopped = True
     request.app.state.motor_manager.emergency_stop()
-    request.app.state.motor_manager_ready = False
-    request.app.state.robot_state = RobotState.error
+    request.app.state.robot_state = RobotState.idle
     return EmergencyStopSetResponse(
         ok=True,
-        emergency_stopped=True,
+        emergency_stopped=False,
         running=False,
         robot_state=request.app.state.robot_state,
     )
@@ -338,10 +335,8 @@ async def set_emergency_stop(request: Request) -> EmergencyStopSetResponse:
     tags=["emergency-stop"],
 )
 async def clear_emergency_stop(request: Request) -> EmergencyStopClearResponse:
-    """Clear emergency stop and return the robot action state to home."""
-    request.app.state.emergency_stopped = False
+    """Compatibility no-op for the old clear endpoint."""
     request.app.state.motor_manager.clear_emergency_stop()
-    request.app.state.robot_state = RobotState.idle
     return EmergencyStopClearResponse(
         ok=True,
         emergency_stopped=False,

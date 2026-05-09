@@ -20,7 +20,6 @@ def _create_motor_manager() -> MotorManager:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.running = False
-    app.state.emergency_stopped = False
     app.state.robot_state = RobotState.idle
     app.state.tease_count = 0
     app.state.max_tease = 10
