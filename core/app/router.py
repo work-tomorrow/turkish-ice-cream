@@ -53,7 +53,7 @@ def _status_payload(request: Request | WebSocket) -> StatusResponse:
     hand = request.app.state.hand
     return StatusResponse(
         system=StatusSystem(
-            ready=True,
+            ready=bool(getattr(request.app.state, "vision_ready", False)),
             emergency_stopped=False,
         ),
         robot=StatusRobot(state=request.app.state.robot_state),
@@ -394,18 +394,20 @@ async def clear_emergency_stop(request: Request) -> EmergencyStopClearResponse:
 
 
 @api_router.get("/vision/frame", tags=["vision"])
-async def get_vision_frame() -> Response:
-    """Return one placeholder JPEG frame for the hand detection overlay."""
-    return Response(content=PLACEHOLDER_JPEG, media_type="image/jpeg")
+async def get_vision_frame(request: Request) -> Response:
+    """Return the latest vision frame with the current detection overlay."""
+    frame = request.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
+    return Response(content=frame, media_type="image/jpeg")
 
 
 @api_router.websocket("/ws/vision")
 async def ws_vision(ws: WebSocket):
-    """Stream placeholder JPEG frames for the hand detection overlay."""
+    """Stream the latest vision frame with the current detection overlay."""
     await ws.accept()
     try:
         while True:
-            await ws.send_bytes(PLACEHOLDER_JPEG)
+            frame = ws.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
+            await ws.send_bytes(frame)
             await asyncio.sleep(0.1)
     except WebSocketDisconnect:
         pass
