@@ -98,9 +98,9 @@ class LabEscapeConfig:
     """
 
     # Workspace geometry: centered 50cm x 50cm square, y/z in [-25, 25].
-    boundary_size_cm: float = 30.0
-    origin_to_left_boundary_cm: float = 15.0
-    origin_to_top_boundary_cm: float = 15.0
+    boundary_size_cm: float = 20.0
+    origin_to_left_boundary_cm: float = 10.0
+    origin_to_top_boundary_cm: float = 10.0
 
     # Camera mapping. Calibrate these four image points to the physical
     # workspace corners, in this order:
@@ -123,14 +123,14 @@ class LabEscapeConfig:
     max_command_step_cm: float = 20.0
 
     # Object sizes.
-    hand_radius_cm: float = 3.0
-    ice_radius_cm: float = 2.0
+    hand_radius_cm: float = 1.0
+    ice_radius_cm: float = 1.0
 
     # State thresholds. These are the main knobs you are expected to tune.
     escape_trigger_distance_cm: float = 0.0
-    close_retreat_distance_cm: float = 2.0
-    boundary_enter_margin_cm: float = 2.0
-    boundary_exit_margin_cm: float = 5.0
+    close_retreat_distance_cm: float = 1.0
+    boundary_enter_margin_cm: float = 1.0
+    boundary_exit_margin_cm: float = 2.0
     enable_close_retreat: bool = True
 
     # Internal stability knobs. Usually do not touch these first.
@@ -139,10 +139,10 @@ class LabEscapeConfig:
     blind_zone_detection_margin_cm: float = 2.5
 
     # Motion speeds in the lab YZ plane.
-    normal_speed_cm_s: float = 50.0
-    boundary_speed_cm_s: float = 50.0
-    retreat_speed_cm_s: float = 50.0
-    idle_speed_cm_s: float = 10.0
+    normal_speed_cm_s: float = 5.0
+    boundary_speed_cm_s: float = 5.0
+    retreat_speed_cm_s: float = 5.0
+    idle_speed_cm_s: float = 3.0
 
     blind_zone: Rect | None = None
 
