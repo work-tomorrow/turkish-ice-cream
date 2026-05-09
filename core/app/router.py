@@ -116,6 +116,13 @@ async def _cancel_debug_move(app: FastAPI) -> None:
     app.state.debug_move_task = None
 
 
+def _clear_debug_session_state(app: FastAPI) -> None:
+    app.state.debug_session_active = False
+    app.state.debug_move_target_y_cm = None
+    app.state.debug_move_target_z_cm = None
+    app.state.debug_move_duration_s = None
+
+
 def _debug_session_payload(app: FastAPI) -> DebugSessionResponse:
     task = _debug_move_task(app)
     return DebugSessionResponse(
@@ -307,7 +314,9 @@ async def delete_session(request: Request) -> SessionDeleteResponse:
     """Stop the current demo session and all motors."""
     request.app.state.robot_state = RobotState.stopping
     request.app.state.running = False
+    await _cancel_debug_move(request.app)
     request.app.state.motor_manager.stop()
+    _clear_debug_session_state(request.app)
     request.app.state.robot_state = RobotState.idle
     return SessionDeleteResponse(
         ok=True,
@@ -502,6 +511,7 @@ async def start_debug_session(request: Request) -> DebugSessionResponse:
 
         _ensure_motor_manager_ready(request)
         request.app.state.debug_session_active = True
+        request.app.state.robot_state = RobotState.debug
 
         response = _debug_session_payload(request.app)
         response.message = "Debug mode started."
@@ -518,10 +528,8 @@ async def stop_debug_session(request: Request) -> DebugSessionResponse:
     async with _debug_move_lock(request.app):
         await _cancel_debug_move(request.app)
         request.app.state.motor_manager.stop()
-        request.app.state.debug_session_active = False
-        request.app.state.debug_move_target_y_cm = None
-        request.app.state.debug_move_target_z_cm = None
-        request.app.state.debug_move_duration_s = None
+        _clear_debug_session_state(request.app)
+        request.app.state.robot_state = RobotState.idle
 
         response = _debug_session_payload(request.app)
         response.message = "Debug mode stopped."

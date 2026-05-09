@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class RobotState(str, Enum):
     idle = "idle"
     started = "started"
+    debug = "debug"
     stopping = "stopping"
     error = "error"
 
