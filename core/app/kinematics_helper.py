@@ -55,48 +55,17 @@ import numpy as np
 @dataclass(frozen=True)
 class JointLimit:
     """
-    單一馬達的設定。
-
-    model angle:
-        IK / FK 內部使用的角度。
-
-    motor angle:
-        實際送給 MotorManager / 馬達的角度。
-
-    轉換公式：
-        motor = zero_deg + sign * model
-
-    sign:
-        1.0 代表馬達正方向跟 model 相同。
-        -1.0 代表馬達正方向跟 model 相反。
+    單一馬達的實體角度範圍。
 
     min_deg / max_deg:
-        馬達實際允許角度範圍，單位 degree。
+        實際送給 MotorManager / 馬達的角度範圍，單位 degree。
     """
 
     min_deg: float = -180.0
     max_deg: float = 180.0
-    sign: float = 1.0
-    zero_deg: float = 0.0
-
-    def model_to_motor(self, model_deg: float) -> float:
-        return self.zero_deg + self.sign * model_deg
-
-    def motor_to_model(self, motor_deg: float) -> float:
-        return (motor_deg - self.zero_deg) / self.sign
 
     def clamp_motor(self, motor_deg: float) -> float:
         return clamp(motor_deg, self.min_deg, self.max_deg)
-
-    def clamp_model(self, model_deg: float) -> float:
-        motor_deg = self.model_to_motor(model_deg)
-        motor_deg = self.clamp_motor(motor_deg)
-        return self.motor_to_model(motor_deg)
-
-    def model_bounds_deg(self) -> tuple[float, float]:
-        a = self.motor_to_model(self.min_deg)
-        b = self.motor_to_model(self.max_deg)
-        return min(a, b), max(a, b)
 
 
 @dataclass(frozen=True)
@@ -118,16 +87,39 @@ class ArmIKConfig:
     max_extra_pitch_deg: float = 60.0
     max_extra_yaw_deg: float = 30.0
 
-    # 每顆馬達的實體角度範圍與方向
+    # 每顆馬達的實體角度範圍。
     # 這裡的 min/max 是「實際送給馬達」的角度，不是 model angle。
-    # 如果某顆馬達方向反了，把 sign 設成 -1.0。
     joint_limits: dict[str, JointLimit] = field(
         default_factory=lambda: {
-            "J1": JointLimit(min_deg=-45.0, max_deg=45.0, sign=1.0, zero_deg=0.0),
+            "J1": JointLimit(min_deg=-45.0, max_deg=45.0),
             # 依照目前 visualizer 使用的範圍。
-            "J2": JointLimit(min_deg=-30.0, max_deg=90.0, sign=-1.0, zero_deg=0.0),
-            "J3": JointLimit(min_deg=-60.0, max_deg=60.0, sign=-1.0, zero_deg=0.0),
-            "J4": JointLimit(min_deg=-60.0, max_deg=60.0, sign=-1.0, zero_deg=0.0),
+            "J2": JointLimit(min_deg=-30.0, max_deg=90.0),
+            "J3": JointLimit(min_deg=-60.0, max_deg=60.0),
+            "J4": JointLimit(min_deg=-60.0, max_deg=60.0),
+        }
+    )
+
+    # 每顆馬達方向，手工設定：
+    #   1.0  代表馬達正方向跟 model angle 相同
+    #   -1.0 代表馬達正方向跟 model angle 相反
+    joint_signs: dict[str, float] = field(
+        default_factory=lambda: {
+            "J1": 1.0,
+            "J2": 1.0,
+            "J3": 1.0,
+            "J4": -1.0,
+        }
+    )
+
+    # 每顆馬達的零點 offset，手工設定。
+    # 轉換公式：
+    #   motor = zero_deg + sign * model
+    joint_zero_degs: dict[str, float] = field(
+        default_factory=lambda: {
+            "J1": 0.0,
+            "J2": 0.0,
+            "J3": 0.0,
+            "J4": 0.0,
         }
     )
 
@@ -314,14 +306,32 @@ class ArmIKHelper:
         effective_extra_length = cfg.l_rod + cfg.j3_forward_offset
         return effective_extra_length * math.sin(math.radians(max_extra_deg))
 
+    def model_to_motor_angle(self, joint: str, model_deg: float) -> float:
+        """
+        將 model angle 轉成實際送給馬達的角度。
+
+        轉換公式：
+            motor = zero_deg + sign * model
+        """
+        sign = self.config.joint_signs[joint]
+        zero_deg = self.config.joint_zero_degs[joint]
+        return zero_deg + sign * model_deg
+
+    def motor_to_model_angle(self, joint: str, motor_deg: float) -> float:
+        """
+        將實際馬達角度轉回 IK / FK 內部使用的 model angle。
+        """
+        sign = self.config.joint_signs[joint]
+        zero_deg = self.config.joint_zero_degs[joint]
+        return (motor_deg - zero_deg) / sign
+
     def model_to_motor_angles(
         self, model_angles_deg: dict[str, float]
     ) -> dict[str, float]:
         output: dict[str, float] = {}
         for joint, angle in model_angles_deg.items():
-            limit = self.config.joint_limits[joint]
-            motor_deg = limit.model_to_motor(float(angle))
-            output[joint] = limit.clamp_motor(motor_deg)
+            motor_deg = self.model_to_motor_angle(joint, float(angle))
+            output[joint] = self.config.joint_limits[joint].clamp_motor(motor_deg)
         return output
 
     def motor_to_model_angles(
@@ -330,9 +340,8 @@ class ArmIKHelper:
     ) -> dict[str, float]:
         output: dict[str, float] = {}
         for joint, angle in motor_angles_deg.items():
-            limit = self.config.joint_limits[joint]
-            motor_deg = limit.clamp_motor(float(angle))
-            output[joint] = limit.motor_to_model(motor_deg)
+            motor_deg = self.config.joint_limits[joint].clamp_motor(float(angle))
+            output[joint] = self.motor_to_model_angle(joint, motor_deg)
         return output
 
     def end_xyz_from_motor_angles(
@@ -377,7 +386,18 @@ class ArmIKHelper:
         """
         將 model angle 夾到該 joint 的實體馬達範圍內。
         """
-        return self.config.joint_limits[joint].clamp_model(model_deg)
+        motor_deg = self.model_to_motor_angle(joint, model_deg)
+        motor_deg = self.config.joint_limits[joint].clamp_motor(motor_deg)
+        return self.motor_to_model_angle(joint, motor_deg)
+
+    def model_bounds_deg(self, joint: str) -> tuple[float, float]:
+        """
+        回傳某顆 joint 在 model angle 下的可用範圍。
+        """
+        limit = self.config.joint_limits[joint]
+        a = self.motor_to_model_angle(joint, limit.min_deg)
+        b = self.motor_to_model_angle(joint, limit.max_deg)
+        return min(a, b), max(a, b)
 
     def _clamp_v_to_joint_limits(
         self,
@@ -419,9 +439,7 @@ class ArmIKHelper:
 
         # J3 = -J2 + extra_pitch
         j2_rad = float(v[1])
-        j3_model_min_deg, j3_model_max_deg = self.config.joint_limits[
-            "J3"
-        ].model_bounds_deg()
+        j3_model_min_deg, j3_model_max_deg = self.model_bounds_deg("J3")
         extra_pitch_min = math.radians(j3_model_min_deg) + j2_rad
         extra_pitch_max = math.radians(j3_model_max_deg) + j2_rad
 
@@ -439,9 +457,7 @@ class ArmIKHelper:
 
         # J4 = -J1 + extra_yaw
         j1_rad = float(v[0])
-        j4_model_min_deg, j4_model_max_deg = self.config.joint_limits[
-            "J4"
-        ].model_bounds_deg()
+        j4_model_min_deg, j4_model_max_deg = self.model_bounds_deg("J4")
         extra_yaw_min = math.radians(j4_model_min_deg) + j1_rad
         extra_yaw_max = math.radians(j4_model_max_deg) + j1_rad
 

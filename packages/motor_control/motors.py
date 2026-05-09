@@ -158,9 +158,7 @@ class StepperMotor:
         self.ready = True
         self.last_error: str | None = None
 
-        self._steps_per_degree = (
-            int(steps_per_rev) / 360.0
-        )
+        self._steps_per_degree = int(steps_per_rev) / 360.0
         if self._steps_per_degree <= 0:
             raise ValueError(
                 "steps_per_rev, microsteps, and gear_ratio must be positive"
@@ -168,9 +166,7 @@ class StepperMotor:
         self._min_steps = math.ceil(self.min_angle * self._steps_per_degree)
         self._max_steps = math.floor(self.max_angle * self._steps_per_degree)
         if self._min_steps > self._max_steps:
-            raise ValueError(
-                "Stepper angle range is smaller than one reachable step"
-            )
+            raise ValueError("Stepper angle range is smaller than one reachable step")
 
         self._steps_per_second = max(1.0, float(steps_per_second))
         self._half_step_delay_s = 1.0 / (self._steps_per_second * 2.0)
@@ -254,19 +250,14 @@ class StepperMotor:
     def _run_worker(self) -> None:
         while True:
             with self._condition:
-                while (
-                    not self._closed
-                    and self._current_steps == self._target_steps
-                ):
+                while not self._closed and self._current_steps == self._target_steps:
                     self.moving = False
                     self._condition.wait()
 
                 if self._closed:
                     return
 
-                direction = (
-                    1 if self._target_steps > self._current_steps else -1
-                )
+                direction = 1 if self._target_steps > self._current_steps else -1
                 self.moving = True
 
             try:
@@ -317,7 +308,7 @@ class StepperMotor:
     def _angle_to_steps(self, angle: float) -> int:
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
         steps = self._round_steps(angle * self._steps_per_degree)
-        return max(self._min_steps, min(self._max_steps, steps))
+        return steps
 
     def _steps_to_angle(self, steps: int) -> float:
         return float(steps) / self._steps_per_degree
