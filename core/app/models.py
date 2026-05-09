@@ -188,3 +188,7 @@ class DebugMoveResponse(BaseModel):
     target_y_cm: float
     target_z_cm: float
     duration_s: float
+    target_motor_angles: dict[str, float] = Field(
+        default_factory=dict,
+        description="Final logical target angles for each motor.",
+    )

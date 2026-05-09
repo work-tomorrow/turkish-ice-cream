@@ -109,7 +109,7 @@
 <script setup>
 import axios from 'axios'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close, Position, VideoPlay } from '@element-plus/icons-vue'
 import AppHeader from '../components/AppHeader.vue'
 
@@ -149,6 +149,20 @@ const displayValue = (value) => {
 const showError = (title, error) => {
   const detail = error?.response?.data?.detail || error?.message || error
   ElMessage.error(`${title}: ${detail}`)
+}
+
+const showTargetAnglesDialog = async (targetMotorAngles) => {
+  const entries = Object.entries(targetMotorAngles || {})
+  if (!entries.length) return
+
+  const lines = entries.map(([motorId, angle]) => {
+    const numericAngle = Number(angle)
+    return `${motorId}: ${Number.isFinite(numericAngle) ? numericAngle.toFixed(2) : angle}°`
+  })
+
+  await ElMessageBox.alert(lines.join('\n'), 'Final Target Angles', {
+    confirmButtonText: 'OK',
+  })
 }
 
 const applyDebugSession = (payload) => {
@@ -221,6 +235,7 @@ const sendSelectedTarget = () =>
       duration_s: Number(durationS.value),
     })
     applyDebugSession(res.data)
+    await showTargetAnglesDialog(res.data.target_motor_angles)
     ElMessage.success('Debug move started')
   })
 

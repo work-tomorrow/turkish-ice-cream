@@ -79,7 +79,7 @@ def _validate_debug_target(
     *,
     y_cm: float,
     z_cm: float,
-) -> None:
+) -> dict[str, float]:
     try:
         targets, error_cm = _debug_yz_targets(
             app,
@@ -105,6 +105,7 @@ def _validate_debug_target(
                 f"(error={error_cm:.2f} cm)."
             ),
         )
+    return targets
 
 
 async def _cancel_debug_move(app: FastAPI) -> None:
@@ -140,42 +141,28 @@ async def _debug_move_loop(
     *,
     target_y_cm: float,
     target_z_cm: float,
+    target_motor_targets: dict[str, float],
     duration_s: float,
 ) -> None:
     loop = asyncio.get_running_loop()
     t0 = loop.time()
     motor_manager = app.state.motor_manager
-    start_xyz = app.state.controller.current_xyz_cm()
-    start_y_cm = start_xyz.y_cm
-    start_z_cm = start_xyz.z_cm
+    manager_state = motor_manager.get_state()
+    motors_state = manager_state.get("motors", {})
+    start_motor_targets = {
+        motor_id: float(motor_state.get("current_angle", 0.0))
+        for motor_id, motor_state in motors_state.items()
+    }
 
     try:
         while True:
             elapsed = loop.time() - t0
             progress = min(elapsed / duration_s, 1.0)
-            y_cm = start_y_cm + (target_y_cm - start_y_cm) * progress
-            z_cm = start_z_cm + (target_z_cm - start_z_cm) * progress
-            try:
-                targets, error_cm = _debug_yz_targets(
-                    app,
-                    y_cm=y_cm,
-                    z_cm=z_cm,
-                    update_ik_state=True,
-                )
-            except Exception:
-                logger.warning("Debug move IK failed; holding targets", exc_info=True)
-                app.state.robot_state = RobotState.error
-                break
-
-            if targets is None:
-                logger.warning(
-                    "Debug move target not reachable: y=%.2f z=%.2f err=%.2f",
-                    y_cm,
-                    z_cm,
-                    error_cm,
-                )
-                app.state.robot_state = RobotState.error
-                break
+            targets = {
+                motor_id: start_angle
+                + (target_motor_targets[motor_id] - start_angle) * progress
+                for motor_id, start_angle in start_motor_targets.items()
+            }
 
             try:
                 motor_manager.set_target(targets)
@@ -185,6 +172,16 @@ async def _debug_move_loop(
                 break
 
             if progress >= 1.0:
+                try:
+                    app.state.controller.debug_yz_targets(
+                        y_cm=target_y_cm,
+                        z_cm=target_z_cm,
+                        update_ik_state=True,
+                    )
+                except Exception:
+                    logger.warning(
+                        "Debug move final IK state sync failed", exc_info=True
+                    )
                 break
 
             await asyncio.sleep(DEBUG_MOVE_TICK_S)
@@ -555,7 +552,7 @@ async def move_debug_yz(
 
         _ensure_motor_manager_ready(request)
         await _cancel_debug_move(request.app)
-        _validate_debug_target(
+        target_motor_targets = _validate_debug_target(
             request.app,
             y_cm=req.y_cm,
             z_cm=req.z_cm,
@@ -569,6 +566,7 @@ async def move_debug_yz(
                 request.app,
                 target_y_cm=req.y_cm,
                 target_z_cm=req.z_cm,
+                target_motor_targets=target_motor_targets,
                 duration_s=req.duration_s,
             ),
         )
@@ -581,6 +579,10 @@ async def move_debug_yz(
         target_y_cm=req.y_cm,
         target_z_cm=req.z_cm,
         duration_s=req.duration_s,
+        target_motor_angles={
+            motor_id: float(target_motor_targets[motor_id])
+            for motor_id in sorted(target_motor_targets)
+        },
     )
 
 
