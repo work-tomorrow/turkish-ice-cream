@@ -52,10 +52,10 @@ class MotorManager:
         # Default speed limits.
         # You can tune these later based on the real robot.
         self.max_velocity_deg_s = {
-            "m1": 45.0,
-            "m2": 180.0,
-            "m3": 180.0,
-            "m4": 180.0,
+            "m1": 3600.0,
+            "m2": 3600.0,
+            "m3": 3600.0,
+            "m4": 3600.0,
         }
 
         if max_velocity_deg_s is not None:
@@ -125,8 +125,7 @@ class MotorManager:
             self.current_targets[motor_id] = target
 
     def set_target(self, targets: dict[str, float], duration_ms: int = 0) -> None:
-        """Compatibility wrapper.
-        """
+        """Compatibility wrapper."""
 
         self.set_target_angles(targets)
 
@@ -156,7 +155,9 @@ class MotorManager:
                 motor.stop_now()
             elif hasattr(motor, "stop"):
                 motor.stop()
-            self.current_targets[motor_id] = self._logical_current_angle(motor_id, motor)
+            self.current_targets[motor_id] = self._logical_current_angle(
+                motor_id, motor
+            )
 
     def clear_emergency_stop(self) -> None:
         """Compatibility no-op for the old clear operation."""
