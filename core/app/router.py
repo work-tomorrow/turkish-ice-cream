@@ -428,8 +428,6 @@ async def set_motor_targets(
 @api_router.post("/motors/zero", response_model=MotorZeroResponse, tags=["motors"])
 async def zero_all_motors(request: Request) -> MotorZeroResponse:
     """Save the current motor positions as the absolute zero calibration."""
-    _ensure_motor_manager_ready(request)
-
     motor_ids = list(request.app.state.motor_manager.motors)
     try:
         request.app.state.motor_manager.set_current_angle_zero()
@@ -455,7 +453,6 @@ async def zero_motor(
 ) -> MotorZeroResponse:
     """Save one motor's current position as the absolute zero calibration."""
     _ensure_motor_id(request, motor_id)
-    _ensure_motor_manager_ready(request)
 
     try:
         request.app.state.motor_manager.set_current_angle_zero(motor_id)

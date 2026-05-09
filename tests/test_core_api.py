@@ -291,6 +291,24 @@ class CoreApiMotorTest(unittest.TestCase):
                 {"m1", "m2", "m3", "m4"},
             )
 
+    def test_zero_motor_routes_do_not_home_unready_manager(self) -> None:
+        with _request_context() as request:
+            home_calls = 0
+            original_home_all = request.app.state.motor_manager.home_all
+
+            def track_home_all() -> None:
+                nonlocal home_calls
+                home_calls += 1
+                original_home_all()
+
+            request.app.state.motor_manager.home_all = track_home_all
+
+            asyncio.run(router.zero_motor("m3", request))
+            asyncio.run(router.zero_all_motors(request))
+
+            self.assertEqual(home_calls, 0)
+            self.assertFalse(request.app.state.motor_manager_ready)
+
     def test_zero_motor_route_redefines_absolute_zero_for_future_jogs(self) -> None:
         with _request_context() as request:
             asyncio.run(
