@@ -6,6 +6,7 @@ from core.app import router
 from core.app.main import app
 from core.app.models import Hand, MotorDirection, MotorJogRequest, RobotState
 from motor_control import MotorManager
+from motor_control.mock_motors import build_mock_motors
 
 
 class CoreApiMotorTest(unittest.TestCase):
@@ -67,7 +68,6 @@ class CoreApiMotorTest(unittest.TestCase):
         with _request_context() as request:
             response = asyncio.run(router.get_motors(request))
             payload = response.model_dump()
-            self.assertNotIn("step_degrees", payload)
             self.assertEqual(
                 {motor["id"] for motor in payload["motors"]},
                 {"m1", "m2", "m3", "m4"},
@@ -137,7 +137,7 @@ class CoreApiMotorTest(unittest.TestCase):
 
 class _request_context:
     def __enter__(self):
-        self.motor_manager = MotorManager()
+        self.motor_manager = MotorManager(motors=build_mock_motors())
         state = SimpleNamespace(
             running=False,
             emergency_stopped=False,

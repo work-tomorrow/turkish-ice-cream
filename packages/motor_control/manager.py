@@ -1,167 +1,284 @@
-"""Public motor control API for the robot."""
+"""Simple motor control manager.
+
+The manager is the safety/control layer between upper-level robot logic
+and low-level GPIO motors.
+
+Expected usage:
+    manager = MotorManager()
+    manager.set_target_angles({
+        "m1": 0,
+        "m2": 0,
+        "m3": 90,
+        "m4": 90,
+    })
+"""
 
 from __future__ import annotations
 
-from threading import Lock
-from typing import Protocol
+from typing import Any
 
 from motor_control.config import build_default_motors
-from motor_control.models import MotorKind, MotorManagerState, MotorState
-from motor_control.motors import ServoMotor, StepperMotor
-
-
-class MotorLike(Protocol):
-    id: str
-    kind: MotorKind
-    min_angle: float
-    max_angle: float
-    homed: bool
-    requires_homing: bool
-
-    def move_to(self, target_angle: float, *, duration_ms: int = 0) -> None: ...
-    def home(self) -> None: ...
-    def stop_now(self) -> None: ...
-    def clear_stop(self) -> None: ...
-    def set_current_angle_zero(self) -> None: ...
-    def snapshot(self) -> MotorState: ...
-    def shutdown(self) -> None: ...
-
-
-def _keys_match_exactly(expected: set[str], actual: set[str]) -> None:
-    missing = expected - actual
-    extra = actual - expected
-    if extra:
-        raise ValueError(f"Unknown motor id(s): {', '.join(sorted(extra))}")
-    if missing:
-        raise ValueError(f"Missing target(s) for motor id(s): {', '.join(sorted(missing))}")
 
 
 class MotorManager:
     """Simple synchronous motor manager.
 
-    The upper layer should call set_target_angles() every control tick.
-    This manager validates ids/ranges and immediately forwards targets to motors.
+    Upper layer should call set_target_angles() periodically, e.g. every 100ms.
+
+    This manager handles:
+    - motor id completeness check
+    - angle clamp
+    - speed limiting
+    - emergency stop
+    - state reporting
     """
 
     def __init__(
         self,
-        motors: dict[str, MotorLike] | None = None,
+        motors: dict[str, Any] | None = None,
         *,
-        control_hz: float = 10.0,
-        max_delta_per_tick: dict[str, float] | None = None,
+        dt_s: float = 0.1,
+        max_speed_deg_s: dict[str, float] | None = None,
     ) -> None:
-        if control_hz <= 0:
-            raise ValueError("control_hz must be positive")
+        if dt_s <= 0:
+            raise ValueError("dt_s must be positive")
 
-        self.control_hz = float(control_hz)
-        self._motors: dict[str, MotorLike] = dict(motors) if motors is not None else build_default_motors()
-        if not self._motors:
-            raise ValueError("MotorManager expects at least one motor")
+        self.motors = motors if motors is not None else build_default_motors()
+        if not self.motors:
+            raise ValueError("MotorManager needs at least one motor")
 
-        self._lock = Lock()
-        self._running = True
-        self._emergency_stopped = False
-        self._max_delta_per_tick = dict(max_delta_per_tick or {})
+        self.dt_s = float(dt_s)
+        self.emergency_stopped = False
+
+        # Default speed limits.
+        # You can tune these later based on the real robot.
+        self.max_speed_deg_s = {
+            "m1": 45.0,
+            "m2": 45.0,
+            "m3": 180.0,
+            "m4": 180.0,
+        }
+
+        if max_speed_deg_s is not None:
+            self.max_speed_deg_s.update(max_speed_deg_s)
+
+        # Manager-side target memory.
+        # This is the value after clamp + speed limit.
+        self.current_targets: dict[str, float] = {}
+        self.zero_offsets: dict[str, float] = {}
+        for motor_id, motor in self.motors.items():
+            current_angle = float(
+                getattr(motor, "current_angle", getattr(motor, "home_angle", 0.0))
+            )
+            self.current_targets[motor_id] = current_angle
+            self.zero_offsets[motor_id] = 0.0
 
     @property
     def motor_ids(self) -> tuple[str, ...]:
-        return tuple(self._motors.keys())
-
-    def start(self) -> None:
-        """Compatibility no-op: this manager sends commands synchronously."""
-
-        with self._lock:
-            self._running = True
-
-    def stop(self) -> None:
-        """Mark manager as stopped. It does not disable motors; use cleanup/emergency_stop for that."""
-
-        with self._lock:
-            self._running = False
-
-    def home_all(self) -> None:
-        for motor in self._motors.values():
-            motor.home()
+        return tuple(self.motors.keys())
 
     def set_target_angles(self, targets: dict[str, float]) -> None:
-        with self._lock:
-            if self._emergency_stopped:
-                raise RuntimeError("Emergency stop is active")
-            if not self._running:
-                raise RuntimeError("MotorManager is stopped")
+        """Set target angles for all motors.
 
-            expected = set(self._motors.keys())
-            _keys_match_exactly(expected, set(targets.keys()))
+        targets must contain exactly the same motor ids as self.motors.
+        Example:
+            {
+                "m1": 0,
+                "m2": 0,
+                "m3": 90,
+                "m4": 90,
+            }
+        """
 
-            safe_targets: dict[str, float] = {}
-            for motor_id, raw_target in targets.items():
-                motor = self._motors[motor_id]
-                target = float(raw_target)
-                if target < motor.min_angle or target > motor.max_angle:
-                    raise ValueError(
-                        f"Motor {motor_id} angle {target} outside [{motor.min_angle}, {motor.max_angle}]"
-                    )
-                if motor.requires_homing and not motor.homed:
-                    raise RuntimeError(f"Motor {motor_id} must be homed before movement")
+        if self.emergency_stopped:
+            raise RuntimeError("Emergency stop is active")
 
-                max_delta = self._max_delta_per_tick.get(motor_id)
-                if max_delta is not None:
-                    current = motor.snapshot().target_angle
-                    delta = target - current
-                    if abs(delta) > max_delta:
-                        target = current + max_delta * (1 if delta > 0 else -1)
+        self._check_motor_ids(targets)
 
-                safe_targets[motor_id] = target
+        safe_targets: dict[str, float] = {}
 
+        for motor_id, raw_angle in targets.items():
+            motor = self.motors[motor_id]
+            offset = self.zero_offsets[motor_id]
+
+            # 1. Clamp angle into motor range.
+            target = self._clamp(
+                float(raw_angle),
+                float(motor.min_angle) - offset,
+                float(motor.max_angle) - offset,
+            )
+
+            # 2. Speed limit.
+            current = self.current_targets[motor_id]
+            max_speed = float(self.max_speed_deg_s.get(motor_id, 180.0))
+            max_delta = max_speed * self.dt_s
+
+            delta = target - current
+
+            if delta > max_delta:
+                target = current + max_delta
+            elif delta < -max_delta:
+                target = current - max_delta
+
+            safe_targets[motor_id] = target
+
+        # 3. Send safe targets to motors.
         for motor_id, target in safe_targets.items():
-            self._motors[motor_id].move_to(target, duration_ms=0)
+            physical_target = target + self.zero_offsets[motor_id]
+            self.motors[motor_id].move_to(physical_target)
+            self.current_targets[motor_id] = target
 
-    def set_target(self, targets: dict[str, float], *, duration_ms: int = 0) -> None:
-        """Compatibility wrapper for older callers."""
+    def set_target(self, targets: dict[str, float], duration_ms: int = 0) -> None:
+        """Compatibility wrapper.
+        """
 
         self.set_target_angles(targets)
 
-    def set_current_angle_zero(self, motor_id: str | None = None) -> None:
-        if motor_id is None:
-            for motor in self._motors.values():
-                motor.set_current_angle_zero()
-            return
+    def start(self) -> None:
+        """Compatibility no-op for the old manager lifecycle."""
 
-        motor = self._motors.get(motor_id)
-        if motor is None:
-            raise ValueError(f"Unknown motor id: {motor_id}")
-        motor.set_current_angle_zero()
+    def stop(self) -> None:
+        """Compatibility alias for cleanup()."""
 
-    def get_state(self) -> MotorManagerState:
-        with self._lock:
-            running = self._running
-            emergency_stopped = self._emergency_stopped
+        self.cleanup()
 
-        return MotorManagerState(
-            running=running,
-            emergency_stopped=emergency_stopped,
-            motors={motor_id: motor.snapshot() for motor_id, motor in self._motors.items()},
-        )
+    def home_all(self) -> None:
+        """Move all motors to their home angle."""
+
+        if self.emergency_stopped:
+            raise RuntimeError("Emergency stop is active")
+
+        targets = {}
+        for motor_id, motor in self.motors.items():
+            home_angle = float(getattr(motor, "home_angle", 0.0))
+            targets[motor_id] = home_angle - self.zero_offsets[motor_id]
+
+        self.set_target_angles(targets)
 
     def emergency_stop(self) -> None:
-        with self._lock:
-            self._emergency_stopped = True
-            self._running = False
-        for motor in self._motors.values():
-            motor.stop_now()
+        """Immediately stop all motors and block future movement commands."""
+
+        self.emergency_stopped = True
+
+        for motor in self.motors.values():
+            if hasattr(motor, "stop_now"):
+                motor.stop_now()
+            elif hasattr(motor, "stop"):
+                motor.stop()
 
     def clear_emergency_stop(self) -> None:
-        with self._lock:
-            self._emergency_stopped = False
-            self._running = True
-        for motor in self._motors.values():
-            motor.clear_stop()
+        """Allow motors to move again after emergency_stop()."""
+
+        self.emergency_stopped = False
+
+        for motor in self.motors.values():
+            if hasattr(motor, "clear_stop"):
+                motor.clear_stop()
 
     def reset_emergency_stop(self) -> None:
+        """Alias for clear_emergency_stop()."""
+
         self.clear_emergency_stop()
 
+    def get_state(self) -> dict[str, Any]:
+        """Return simple manager + motor state."""
+
+        return {
+            "emergency_stopped": self.emergency_stopped,
+            "dt_s": self.dt_s,
+            "current_targets": dict(self.current_targets),
+            "motors": {
+                motor_id: self._get_motor_state(motor_id, motor)
+                for motor_id, motor in self.motors.items()
+            },
+        }
+
+    def set_current_angle_zero(self, motor_id: str | None = None) -> None:
+        """Treat the current position as logical zero for one or all motors."""
+
+        motor_ids = [motor_id] if motor_id is not None else list(self.motors)
+        for current_motor_id in motor_ids:
+            if current_motor_id not in self.motors:
+                raise ValueError(f"Unknown motor id: {current_motor_id}")
+
+        for current_motor_id in motor_ids:
+            motor = self.motors[current_motor_id]
+            physical_current = float(getattr(motor, "current_angle", 0.0))
+            self.zero_offsets[current_motor_id] += physical_current
+            self.current_targets[current_motor_id] = 0.0
+
     def cleanup(self) -> None:
-        with self._lock:
-            self._running = False
-        for motor in self._motors.values():
-            motor.shutdown()
+        """Shutdown all motors and release GPIO resources."""
+
+        for motor in self.motors.values():
+            if hasattr(motor, "cleanup"):
+                motor.cleanup()
+            elif hasattr(motor, "shutdown"):
+                motor.shutdown()
+
+    def _check_motor_ids(self, targets: dict[str, float]) -> None:
+        expected = set(self.motors.keys())
+        actual = set(targets.keys())
+
+        missing = expected - actual
+        extra = actual - expected
+
+        if missing or extra:
+            raise ValueError(
+                f"Motor ids mismatch: missing={sorted(missing)}, extra={sorted(extra)}"
+            )
+
+    def _get_motor_state(self, motor_id: str, motor: Any) -> dict[str, Any]:
+        if hasattr(motor, "get_state"):
+            snapshot = motor.get_state()
+            return self._normalize_state(motor_id, snapshot)
+
+        if hasattr(motor, "snapshot"):
+            snapshot = motor.snapshot()
+            if hasattr(snapshot, "__dict__"):
+                snapshot = dict(snapshot.__dict__)
+            return self._normalize_state(motor_id, snapshot)
+
+        snapshot = {
+            "id": getattr(motor, "id", None),
+            "current_angle": getattr(motor, "current_angle", None),
+            "target_angle": getattr(motor, "target_angle", None),
+            "min_angle": getattr(motor, "min_angle", None),
+            "max_angle": getattr(motor, "max_angle", None),
+            "ready": getattr(motor, "ready", None),
+            "last_error": getattr(motor, "last_error", None),
+        }
+        return self._normalize_state(motor_id, snapshot)
+
+    def _normalize_state(self, motor_id: str, snapshot: Any) -> dict[str, Any]:
+        if not isinstance(snapshot, dict):
+            return snapshot
+
+        normalized = dict(snapshot)
+        offset = self.zero_offsets[motor_id]
+
+        current_angle = normalized.get("current_angle")
+        if current_angle is not None:
+            normalized["current_angle"] = float(current_angle) - offset
+
+        target_angle = normalized.get("target_angle")
+        if target_angle is not None:
+            normalized["target_angle"] = float(target_angle) - offset
+
+        min_angle = normalized.get("min_angle")
+        if min_angle is None:
+            min_angle = getattr(self.motors[motor_id], "min_angle", None)
+        if min_angle is not None:
+            normalized["min_angle"] = float(min_angle) - offset
+
+        max_angle = normalized.get("max_angle")
+        if max_angle is None:
+            max_angle = getattr(self.motors[motor_id], "max_angle", None)
+        if max_angle is not None:
+            normalized["max_angle"] = float(max_angle) - offset
+
+        return normalized
+
+    @staticmethod
+    def _clamp(value: float, lo: float, hi: float) -> float:
+        return max(lo, min(hi, value))

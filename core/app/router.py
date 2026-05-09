@@ -30,13 +30,10 @@ from core.app.models import (
     MotorZeroResponse,
     RobotState,
 )
-from motor_control.config import DEFAULT_MOTOR_CONFIGS
 
 api_router = APIRouter()
 
-MOTOR_CONFIGS_BY_ID = {config.id: config for config in DEFAULT_MOTOR_CONFIGS}
 DEFAULT_STEP_DEGREES = 3.0
-CALIBRATION_MOVE_DURATION_MS = 300
 
 PLACEHOLDER_JPEG = base64.b64decode(
     "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////"
@@ -85,7 +82,7 @@ def _ensure_not_emergency_stopped(request: Request) -> None:
 
 
 def _ensure_motor_id(motor_id: str) -> None:
-    if motor_id not in MOTOR_CONFIGS_BY_ID:
+    if motor_id not in {"m1", "m2", "m3", "m4"}:
         raise HTTPException(status_code=400, detail=f"Unknown motor id: {motor_id}")
 
 
@@ -94,7 +91,6 @@ def _ensure_motor_manager_ready(request: Request) -> None:
         return
 
     try:
-        request.app.state.motor_manager.start()
         request.app.state.motor_manager.home_all()
     except Exception as exc:
         request.app.state.motor_manager_ready = False
@@ -108,15 +104,16 @@ def _ensure_motor_manager_ready(request: Request) -> None:
 
 def _motor_payload(request: Request) -> list[MotorStatus]:
     state = request.app.state.motor_manager.get_state()
+    motors = state["motors"]
     return [
         MotorStatus(
-            id=config.id,
-            current_angle=state.motors[config.id].current_angle,
-            min_angle=config.min_angle,
-            max_angle=config.max_angle,
+            id=motor_id,
+            current_angle=float(motor_state["current_angle"]),
+            min_angle=float(motor_state["min_angle"]),
+            max_angle=float(motor_state["max_angle"]),
             step_degrees=DEFAULT_STEP_DEGREES,
         )
-        for config in DEFAULT_MOTOR_CONFIGS
+        for motor_id, motor_state in motors.items()
     ]
 
 
@@ -220,32 +217,31 @@ async def jog_motor(
     _ensure_motor_id(motor_id)
     _ensure_motor_manager_ready(request)
 
-    config = MOTOR_CONFIGS_BY_ID[motor_id]
     delta_degrees = req.step_degrees
     if req.direction is MotorDirection.negative:
         delta_degrees *= -1
 
     manager_state = request.app.state.motor_manager.get_state()
-    next_angle = manager_state.motors[motor_id].current_angle + delta_degrees
-    if next_angle < config.min_angle or next_angle > config.max_angle:
+    motor_state = manager_state["motors"][motor_id]
+    next_angle = float(motor_state["current_angle"]) + delta_degrees
+    if next_angle < float(motor_state["min_angle"]) or next_angle > float(
+        motor_state["max_angle"]
+    ):
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Motor {motor_id} angle {next_angle} outside "
-                f"[{config.min_angle}, {config.max_angle}]"
+                f"[{motor_state['min_angle']}, {motor_state['max_angle']}]"
             ),
         )
 
     targets = {
-        motor_id: motor_state.target_angle
-        for motor_id, motor_state in manager_state.motors.items()
+        current_motor_id: float(current_motor_state["target_angle"])
+        for current_motor_id, current_motor_state in manager_state["motors"].items()
     }
     targets[motor_id] = next_angle
     try:
-        request.app.state.motor_manager.set_target(
-            targets,
-            duration_ms=CALIBRATION_MOVE_DURATION_MS,
-        )
+        request.app.state.motor_manager.set_target(targets)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
@@ -269,7 +265,7 @@ async def zero_all_motors(request: Request) -> MotorZeroResponse:
     _ensure_not_emergency_stopped(request)
     _ensure_motor_manager_ready(request)
 
-    motor_ids = list(MOTOR_CONFIGS_BY_ID)
+    motor_ids = list(request.app.state.motor_manager.motors)
     try:
         request.app.state.motor_manager.set_current_angle_zero()
     except ValueError as exc:
