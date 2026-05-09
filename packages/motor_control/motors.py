@@ -73,7 +73,7 @@ class ServoMotor:
 
     def move_to(self, angle: float, *, duration_ms: int = 0) -> None:
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
-        duty = self._angle_to_duty(angle)
+        duty = 2.5 + (angle / 180.0) * 10.0
 
         try:
             self._pwm.ChangeDutyCycle(duty)
@@ -115,13 +115,13 @@ class ServoMotor:
         self._pwm.stop()
         GPIO.cleanup(self.pin)
 
-    def _angle_to_duty(self, angle: float) -> float:
-        progress = (angle - self.min_angle) / (self.max_angle - self.min_angle)
-        pulse_us = self._min_pulse_us + progress * (
-            self._max_pulse_us - self._min_pulse_us
-        )
-        period_us = 1_000_000.0 / self._frequency_hz
-        return pulse_us / period_us * 100.0
+    # def _angle_to_duty(self, angle: float) -> float:
+    #     progress = (angle - self.min_angle) / (self.max_angle - self.min_angle)
+    #     pulse_us = self._min_pulse_us + progress * (
+    #         self._max_pulse_us - self._min_pulse_us
+    #     )
+    #     period_us = 1_000_000.0 / self._frequency_hz
+    #     return pulse_us / period_us * 100.0
 
 
 class StepperMotor:
@@ -138,9 +138,7 @@ class StepperMotor:
         max_angle: float = 180.0,
         home_angle: float = 0.0,
         steps_per_rev: int = 200,
-        microsteps: int = 16,
-        gear_ratio: float = 1.0,
-        steps_per_second: float = 400.0,
+        steps_per_second: float = 100.0,
     ) -> None:
         self.id = id
         self.kind = MotorKind.STEPPER
@@ -157,7 +155,7 @@ class StepperMotor:
         self.last_error: str | None = None
 
         self._steps_per_degree = (
-            int(steps_per_rev) * int(microsteps) * float(gear_ratio) / 360.0
+            int(steps_per_rev) / 360.0
         )
         if self._steps_per_degree <= 0:
             raise ValueError(
