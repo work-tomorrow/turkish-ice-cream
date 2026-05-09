@@ -266,12 +266,12 @@ onBeforeUnmount(() => {
 }
 
 .status-grid {
-  grid-template-columns: minmax(0, 1.35fr) minmax(320px, 0.8fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
   margin-bottom: 16px;
 }
 
 .control-grid {
-  grid-template-columns: minmax(260px, 0.72fr) minmax(380px, 1.28fr);
+  grid-template-columns: minmax(260px, 0.6fr) minmax(380px, 1.4fr);
 }
 
 @media (max-width: 980px) {
