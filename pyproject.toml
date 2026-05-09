@@ -6,11 +6,7 @@ authors = [{ name = "AaronWu-train", email = "aaronwu0218@gmail.com" }]
 license = { text = "MIT" }
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
-dependencies = [
-    "fastapi>=0.115",
-    "uvicorn[standard]>=0.32",
-    "RPi.GPIO",
-]
+dependencies = ["fastapi>=0.115", "uvicorn[standard]>=0.32", "RPi.GPIO"]
 
 [tool.poetry]
 packages = [
