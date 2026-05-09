@@ -2,116 +2,124 @@
 
 from __future__ import annotations
 
-from threading import Condition, Event, Lock, Thread
-from time import monotonic
-from typing import Callable
+from threading import Lock
+from typing import Protocol
 
 from motor_control.config import build_default_motors
-from motor_control.models import MotorManagerState
+from motor_control.models import MotorKind, MotorManagerState, MotorState
 from motor_control.motors import ServoMotor, StepperMotor
+
+
+class MotorLike(Protocol):
+    id: str
+    kind: MotorKind
+    min_angle: float
+    max_angle: float
+    homed: bool
+    requires_homing: bool
+
+    def move_to(self, target_angle: float, *, duration_ms: int = 0) -> None: ...
+    def home(self) -> None: ...
+    def stop_now(self) -> None: ...
+    def clear_stop(self) -> None: ...
+    def set_current_angle_zero(self) -> None: ...
+    def snapshot(self) -> MotorState: ...
+    def shutdown(self) -> None: ...
 
 
 def _keys_match_exactly(expected: set[str], actual: set[str]) -> None:
     missing = expected - actual
     extra = actual - expected
-    if missing or extra:
-        if extra:
-            unknown = ", ".join(sorted(extra))
-            raise ValueError(f"Unknown motor id(s): {unknown}")
-        missing_ids = ", ".join(sorted(missing))
-        raise ValueError(f"Missing target(s) for motor id(s): {missing_ids}")
+    if extra:
+        raise ValueError(f"Unknown motor id(s): {', '.join(sorted(extra))}")
+    if missing:
+        raise ValueError(f"Missing target(s) for motor id(s): {', '.join(sorted(missing))}")
 
 
 class MotorManager:
+    """Simple synchronous motor manager.
+
+    The upper layer should call set_target_angles() every control tick.
+    This manager validates ids/ranges and immediately forwards targets to motors.
+    """
+
     def __init__(
         self,
-        motors: dict[str, ServoMotor | StepperMotor] | None = None,
+        motors: dict[str, MotorLike] | None = None,
         *,
-        control_hz: float = 50.0,
-        tick_timing_hook: Callable[[float], None] | None = None,
+        control_hz: float = 10.0,
+        max_delta_per_tick: dict[str, float] | None = None,
     ) -> None:
         if control_hz <= 0:
             raise ValueError("control_hz must be positive")
 
         self.control_hz = float(control_hz)
-        self._motors: dict[str, ServoMotor | StepperMotor] = (
-            dict(motors) if motors is not None else build_default_motors()
-        )
+        self._motors: dict[str, MotorLike] = dict(motors) if motors is not None else build_default_motors()
         if not self._motors:
             raise ValueError("MotorManager expects at least one motor")
 
         self._lock = Lock()
-        self._command_condition = Condition(self._lock)
-        self._stop_event = Event()
-        self._worker: Thread | None = None
-        self._running = False
+        self._running = True
         self._emergency_stopped = False
-        self._pending_targets: dict[str, float] | None = None
-        self._pending_duration_ms = 0
-        self._tick_timing_hook = tick_timing_hook
+        self._max_delta_per_tick = dict(max_delta_per_tick or {})
 
     @property
     def motor_ids(self) -> tuple[str, ...]:
         return tuple(self._motors.keys())
 
     def start(self) -> None:
+        """Compatibility no-op: this manager sends commands synchronously."""
+
         with self._lock:
-            if self._running:
-                return
-            self._stop_event.clear()
             self._running = True
-            self._worker = Thread(
-                target=self._run_worker,
-                name="motor-manager-worker",
-                daemon=True,
-            )
-            self._worker.start()
-            self._command_condition.notify_all()
 
     def stop(self) -> None:
-        worker: Thread | None = None
-        with self._lock:
-            if not self._running and self._worker is None:
-                return
-            self._running = False
-            self._stop_event.set()
-            self._command_condition.notify_all()
-            worker = self._worker
-            self._worker = None
+        """Mark manager as stopped. It does not disable motors; use cleanup/emergency_stop for that."""
 
-        if worker is not None:
-            worker.join(timeout=1.0)
+        with self._lock:
+            self._running = False
 
     def home_all(self) -> None:
         for motor in self._motors.values():
             motor.home()
 
-    def set_target(self, targets: dict[str, float], *, duration_ms: int) -> None:
-        with self._command_condition:
+    def set_target_angles(self, targets: dict[str, float]) -> None:
+        with self._lock:
             if self._emergency_stopped:
                 raise RuntimeError("Emergency stop is active")
+            if not self._running:
+                raise RuntimeError("MotorManager is stopped")
 
             expected = set(self._motors.keys())
             _keys_match_exactly(expected, set(targets.keys()))
 
+            safe_targets: dict[str, float] = {}
             for motor_id, raw_target in targets.items():
                 motor = self._motors[motor_id]
-                if raw_target < motor.min_angle or raw_target > motor.max_angle:
+                target = float(raw_target)
+                if target < motor.min_angle or target > motor.max_angle:
                     raise ValueError(
-                        f"Motor {motor_id} angle {raw_target} outside "
-                        f"[{motor.min_angle}, {motor.max_angle}]"
+                        f"Motor {motor_id} angle {target} outside [{motor.min_angle}, {motor.max_angle}]"
                     )
-
-            for motor_id, motor in self._motors.items():
-                if isinstance(motor, StepperMotor) and motor.requires_homing and not motor.homed:
+                if motor.requires_homing and not motor.homed:
                     raise RuntimeError(f"Motor {motor_id} must be homed before movement")
 
-            self._pending_targets = {motor_id: float(target) for motor_id, target in targets.items()}
-            self._pending_duration_ms = int(duration_ms)
-            self._command_condition.notify_all()
+                max_delta = self._max_delta_per_tick.get(motor_id)
+                if max_delta is not None:
+                    current = motor.snapshot().target_angle
+                    delta = target - current
+                    if abs(delta) > max_delta:
+                        target = current + max_delta * (1 if delta > 0 else -1)
 
-    def set_target_angles(self, targets: dict[str, float]) -> None:
-        self.set_target(targets, duration_ms=0)
+                safe_targets[motor_id] = target
+
+        for motor_id, target in safe_targets.items():
+            self._motors[motor_id].move_to(target, duration_ms=0)
+
+    def set_target(self, targets: dict[str, float], *, duration_ms: int = 0) -> None:
+        """Compatibility wrapper for older callers."""
+
+        self.set_target_angles(targets)
 
     def set_current_angle_zero(self, motor_id: str | None = None) -> None:
         if motor_id is None:
@@ -127,22 +135,25 @@ class MotorManager:
     def get_state(self) -> MotorManagerState:
         with self._lock:
             running = self._running
+            emergency_stopped = self._emergency_stopped
 
         return MotorManagerState(
             running=running,
+            emergency_stopped=emergency_stopped,
             motors={motor_id: motor.snapshot() for motor_id, motor in self._motors.items()},
         )
 
     def emergency_stop(self) -> None:
         with self._lock:
             self._emergency_stopped = True
+            self._running = False
         for motor in self._motors.values():
             motor.stop_now()
-        self.stop()
 
     def clear_emergency_stop(self) -> None:
         with self._lock:
             self._emergency_stopped = False
+            self._running = True
         for motor in self._motors.values():
             motor.clear_stop()
 
@@ -150,30 +161,7 @@ class MotorManager:
         self.clear_emergency_stop()
 
     def cleanup(self) -> None:
-        self.stop()
+        with self._lock:
+            self._running = False
         for motor in self._motors.values():
             motor.shutdown()
-
-    def _run_worker(self) -> None:
-        tick_period_s = 1.0 / self.control_hz
-        while not self._stop_event.is_set():
-            started_at = monotonic()
-
-            with self._command_condition:
-                if self._pending_targets is None and not self._stop_event.is_set():
-                    self._command_condition.wait(timeout=tick_period_s)
-
-                if self._stop_event.is_set():
-                    break
-
-                pending_targets = self._pending_targets
-                pending_duration_ms = self._pending_duration_ms
-                self._pending_targets = None
-
-            if pending_targets is not None:
-                for motor_id, target in pending_targets.items():
-                    self._motors[motor_id].move_to(target, duration_ms=pending_duration_ms)
-
-            elapsed_ms = max(0.0, (monotonic() - started_at) * 1000.0)
-            if self._tick_timing_hook is not None:
-                self._tick_timing_hook(elapsed_ms)

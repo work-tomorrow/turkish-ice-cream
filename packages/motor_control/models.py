@@ -1,9 +1,10 @@
-"""Shared data models for mixed motor control."""
+"""Shared data models for motor control."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 
 class MotorKind(str, Enum):
@@ -11,7 +12,6 @@ class MotorKind(str, Enum):
 
     STEPPER = "stepper"
     SERVO = "servo"
-    PM30225_SERIAL = "pm30225_serial"
 
 
 @dataclass(frozen=True)
@@ -24,8 +24,8 @@ class MotorConfig:
     max_angle: float
     home_angle: float = 0.0
     zero_offset: float = 0.0
-    driver_type: str = "mock"
-    driver_options: dict[str, object] = field(default_factory=dict)
+    driver_type: str = "hardware"
+    driver_options: dict[str, Any] = field(default_factory=dict)
     requires_homing: bool = False
     steps_per_rev: int | None = None
     microsteps: int = 1
@@ -38,10 +38,8 @@ class MotorState:
 
     id: str
     kind: MotorKind
-    # Trajectory setpoints (same interpolation clock as MotorManager ticks).
     current_angle: float
     target_angle: float
-    # Optional: hardware-estimated angle (e.g. step count); None if unknown.
     hw_angle: float | None = None
     moving: bool = False
     homed: bool = False
@@ -55,4 +53,5 @@ class MotorManagerState:
     """Snapshot of the manager and all motors."""
 
     running: bool
+    emergency_stopped: bool
     motors: dict[str, MotorState]

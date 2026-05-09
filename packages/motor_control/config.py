@@ -1,8 +1,7 @@
-"""Default motor configuration and instance builders for m1~m4."""
+"""Default hardware configuration and builders for m1~m4."""
 
 from __future__ import annotations
 
-import os
 from typing import Any, Iterable
 
 from motor_control.models import MotorConfig, MotorKind
@@ -25,12 +24,12 @@ SERVO_MIN_PULSE_US = 500.0
 SERVO_MAX_PULSE_US = 2500.0
 SERVO_HOLD_TIME_S = 0.8
 
-HARDWARE_STEPPER_OPTIONS: dict[str, dict[str, Any]] = {
-    "m1": {"step_pin": 17, "dir_pin": 27, "driver": "hardware"},
-    "m2": {"step_pin": 23, "dir_pin": 24, "driver": "hardware"},
+DEFAULT_STEPPER_OPTIONS: dict[str, dict[str, Any]] = {
+    "m1": {"step_pin": 17, "dir_pin": 27},
+    "m2": {"step_pin": 23, "dir_pin": 24},
 }
 
-HARDWARE_SERVO_OPTIONS: dict[str, dict[str, Any]] = {
+DEFAULT_SERVO_OPTIONS: dict[str, dict[str, Any]] = {
     "m3": {"signal_pin": 18},
     "m4": {"signal_pin": 19},
 }
@@ -47,76 +46,18 @@ def _merge_options(
     return merged
 
 
-def build_m1_m4_mock_configs() -> list[MotorConfig]:
-    return [
-        MotorConfig(
-            id="m1",
-            kind=MotorKind.STEPPER,
-            min_angle=STEPPER_ANGLE_RANGE[0],
-            max_angle=STEPPER_ANGLE_RANGE[1],
-            home_angle=STEPPER_HOME_ANGLE,
-            driver_type="mock_stepper",
-            driver_options={
-                "max_velocity_deg_s": DEFAULT_STEPPER_MAX_VELOCITY_DEG_S,
-            },
-            requires_homing=True,
-            steps_per_rev=STEPPER_STEPS_PER_REV,
-            microsteps=STEPPER_MICROSTEPS,
-        ),
-        MotorConfig(
-            id="m2",
-            kind=MotorKind.STEPPER,
-            min_angle=STEPPER_ANGLE_RANGE[0],
-            max_angle=STEPPER_ANGLE_RANGE[1],
-            home_angle=STEPPER_HOME_ANGLE,
-            driver_type="mock_stepper",
-            driver_options={
-                "max_velocity_deg_s": DEFAULT_STEPPER_MAX_VELOCITY_DEG_S,
-            },
-            requires_homing=True,
-            steps_per_rev=STEPPER_STEPS_PER_REV,
-            microsteps=STEPPER_MICROSTEPS,
-        ),
-        MotorConfig(
-            id="m3",
-            kind=MotorKind.SERVO,
-            min_angle=SERVO_ANGLE_RANGE[0],
-            max_angle=SERVO_ANGLE_RANGE[1],
-            home_angle=SERVO_HOME_ANGLE,
-            driver_type="mock_servo",
-            driver_options={
-                "frequency_hz": SERVO_FREQUENCY_HZ,
-                "min_pulse_us": SERVO_MIN_PULSE_US,
-                "max_pulse_us": SERVO_MAX_PULSE_US,
-                "hold_time_s": SERVO_HOLD_TIME_S,
-                "max_velocity_deg_s": DEFAULT_SERVO_MAX_VELOCITY_DEG_S,
-            },
-        ),
-        MotorConfig(
-            id="m4",
-            kind=MotorKind.SERVO,
-            min_angle=SERVO_ANGLE_RANGE[0],
-            max_angle=SERVO_ANGLE_RANGE[1],
-            home_angle=SERVO_HOME_ANGLE,
-            driver_type="mock_servo",
-            driver_options={
-                "frequency_hz": SERVO_FREQUENCY_HZ,
-                "min_pulse_us": SERVO_MIN_PULSE_US,
-                "max_pulse_us": SERVO_MAX_PULSE_US,
-                "hold_time_s": SERVO_HOLD_TIME_S,
-                "max_velocity_deg_s": DEFAULT_SERVO_MAX_VELOCITY_DEG_S,
-            },
-        ),
-    ]
-
-
-def build_m1_m4_hardware_configs(
+def build_default_motor_configs(
     *,
     stepper_options: dict[str, dict[str, Any]] | None = None,
     servo_options: dict[str, dict[str, Any]] | None = None,
 ) -> list[MotorConfig]:
-    resolved_stepper_options = _merge_options(HARDWARE_STEPPER_OPTIONS, stepper_options)
-    resolved_servo_options = _merge_options(HARDWARE_SERVO_OPTIONS, servo_options)
+    """Build default real-hardware configs for m1~m4.
+
+    Pin numbers are BCM GPIO numbers, not physical board pin numbers.
+    """
+
+    resolved_stepper_options = _merge_options(DEFAULT_STEPPER_OPTIONS, stepper_options)
+    resolved_servo_options = _merge_options(DEFAULT_SERVO_OPTIONS, servo_options)
 
     return [
         MotorConfig(
@@ -132,12 +73,8 @@ def build_m1_m4_hardware_configs(
                 **resolved_stepper_options["m1"],
             },
             requires_homing=True,
-            steps_per_rev=int(
-                resolved_stepper_options["m1"].get("steps_per_rev", STEPPER_STEPS_PER_REV)
-            ),
-            microsteps=int(
-                resolved_stepper_options["m1"].get("microsteps", STEPPER_MICROSTEPS)
-            ),
+            steps_per_rev=int(resolved_stepper_options["m1"].get("steps_per_rev", STEPPER_STEPS_PER_REV)),
+            microsteps=int(resolved_stepper_options["m1"].get("microsteps", STEPPER_MICROSTEPS)),
             gear_ratio=float(resolved_stepper_options["m1"].get("gear_ratio", 1.0)),
         ),
         MotorConfig(
@@ -153,12 +90,8 @@ def build_m1_m4_hardware_configs(
                 **resolved_stepper_options["m2"],
             },
             requires_homing=True,
-            steps_per_rev=int(
-                resolved_stepper_options["m2"].get("steps_per_rev", STEPPER_STEPS_PER_REV)
-            ),
-            microsteps=int(
-                resolved_stepper_options["m2"].get("microsteps", STEPPER_MICROSTEPS)
-            ),
+            steps_per_rev=int(resolved_stepper_options["m2"].get("steps_per_rev", STEPPER_STEPS_PER_REV)),
+            microsteps=int(resolved_stepper_options["m2"].get("microsteps", STEPPER_MICROSTEPS)),
             gear_ratio=float(resolved_stepper_options["m2"].get("gear_ratio", 1.0)),
         ),
         MotorConfig(
@@ -167,7 +100,7 @@ def build_m1_m4_hardware_configs(
             min_angle=float(resolved_servo_options["m3"].get("min_angle", SERVO_ANGLE_RANGE[0])),
             max_angle=float(resolved_servo_options["m3"].get("max_angle", SERVO_ANGLE_RANGE[1])),
             home_angle=float(resolved_servo_options["m3"].get("home_angle", SERVO_HOME_ANGLE)),
-            driver_type="mg995_servo",
+            driver_type="gpio_servo",
             driver_options={
                 "frequency_hz": SERVO_FREQUENCY_HZ,
                 "min_pulse_us": SERVO_MIN_PULSE_US,
@@ -183,7 +116,7 @@ def build_m1_m4_hardware_configs(
             min_angle=float(resolved_servo_options["m4"].get("min_angle", SERVO_ANGLE_RANGE[0])),
             max_angle=float(resolved_servo_options["m4"].get("max_angle", SERVO_ANGLE_RANGE[1])),
             home_angle=float(resolved_servo_options["m4"].get("home_angle", SERVO_HOME_ANGLE)),
-            driver_type="mg995_servo",
+            driver_type="gpio_servo",
             driver_options={
                 "frequency_hz": SERVO_FREQUENCY_HZ,
                 "min_pulse_us": SERVO_MIN_PULSE_US,
@@ -194,18 +127,6 @@ def build_m1_m4_hardware_configs(
             },
         ),
     ]
-
-
-def build_default_motor_configs() -> list[MotorConfig]:
-    profile = os.getenv("TURKISH_ICE_CREAM_MOTOR_PROFILE", "mock").strip().lower()
-    if profile == "mock":
-        return build_m1_m4_mock_configs()
-    if profile == "hardware":
-        return build_m1_m4_hardware_configs()
-    raise ValueError("TURKISH_ICE_CREAM_MOTOR_PROFILE must be 'mock' or 'hardware'")
-
-
-DEFAULT_MOTOR_CONFIGS = build_default_motor_configs()
 
 
 def build_motors_from_configs(
