@@ -3,6 +3,7 @@ import base64
 
 from fastapi import APIRouter, HTTPException, Request, Response, WebSocket
 from fastapi import WebSocketDisconnect
+from fastapi.responses import StreamingResponse
 
 from core.app.models import (
     EmergencyStopClearResponse,
@@ -47,6 +48,18 @@ PLACEHOLDER_JPEG = base64.b64decode(
     "AAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAI"
     "AQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/2gAIAQEAAT8QH//Z"
 )
+
+
+async def _vision_mjpeg_stream(request: Request):
+    while True:
+        frame = request.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
+        yield (
+            b"--frame\r\n"
+            b"Content-Type: image/jpeg\r\n\r\n"
+            + frame
+            + b"\r\n"
+        )
+        await asyncio.sleep(1 / 30)
 
 
 def _status_payload(request: Request | WebSocket) -> StatusResponse:
@@ -398,6 +411,15 @@ async def get_vision_frame(request: Request) -> Response:
     """Return the latest vision frame with the current detection overlay."""
     frame = request.app.state.latest_frame_jpeg or PLACEHOLDER_JPEG
     return Response(content=frame, media_type="image/jpeg")
+
+
+@api_router.get("/vision/stream", tags=["vision"])
+async def get_vision_stream(request: Request) -> StreamingResponse:
+    """Stream the latest vision frames as MJPEG for a more stable browser preview."""
+    return StreamingResponse(
+        _vision_mjpeg_stream(request),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @api_router.websocket("/ws/vision")

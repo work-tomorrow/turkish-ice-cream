@@ -105,8 +105,8 @@ const frameUrl = computed(() => {
 })
 
 const visionStreamUrl = computed(() => {
-  const apiBase = axios.defaults.baseURL || window.location.origin
-  return `${apiBase.replace(/^http/, 'ws').replace(/\/$/, '')}/ws/vision`
+  const baseURL = axios.defaults.baseURL || ''
+  return `${baseURL}/vision/stream`
 })
 
 const lastUpdated = computed(() => {

@@ -12,7 +12,7 @@
       </div>
     </template>
     <div class="frame-box">
-      <img :src="visibleFrameUrl" alt="Current vision frame" @error="$emit('frame-error')" />
+      <img :src="visibleFrameUrl" alt="Current vision frame" @error="handleFrameError" />
       <el-empty v-if="frameError" description="No frame" />
     </div>
   </el-card>
@@ -20,7 +20,7 @@
 
 <script setup>
 import { Picture } from '@element-plus/icons-vue'
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 
 const props = defineProps({
   frameUrl: {
@@ -39,61 +39,20 @@ const props = defineProps({
 
 const emit = defineEmits(['reload', 'frame-error'])
 
-const liveConnected = ref(false)
-const liveFrameUrl = ref('')
-let visionSocket = null
-let previousFrameUrl = ''
+const streamFailed = ref(false)
 
-const visibleFrameUrl = computed(() => liveFrameUrl.value || props.frameUrl)
-
-const releasePreviousFrame = () => {
-  if (previousFrameUrl) {
-    URL.revokeObjectURL(previousFrameUrl)
-    previousFrameUrl = ''
-  }
-}
-
-const setLiveFrame = (data) => {
-  releasePreviousFrame()
-  const blob = data instanceof Blob ? data : new Blob([data], { type: 'image/jpeg' })
-  liveFrameUrl.value = URL.createObjectURL(blob)
-  previousFrameUrl = liveFrameUrl.value
-}
-
-const connectVisionStream = () => {
-  visionSocket = new WebSocket(props.streamUrl)
-  visionSocket.binaryType = 'blob'
-
-  visionSocket.onopen = () => {
-    liveConnected.value = true
-  }
-  visionSocket.onmessage = (event) => {
-    setLiveFrame(event.data)
-  }
-  visionSocket.onclose = () => {
-    liveConnected.value = false
-  }
-  visionSocket.onerror = () => {
-    liveConnected.value = false
-  }
-}
+const liveConnected = computed(() => !streamFailed.value)
+const visibleFrameUrl = computed(() => (streamFailed.value ? props.frameUrl : props.streamUrl))
 
 const reloadSnapshot = () => {
   emit('reload')
-  if (!liveConnected.value) {
-    liveFrameUrl.value = ''
-    releasePreviousFrame()
-  }
+  streamFailed.value = false
 }
 
-onMounted(() => {
-  connectVisionStream()
-})
-
-onBeforeUnmount(() => {
-  visionSocket?.close()
-  releasePreviousFrame()
-})
+const handleFrameError = () => {
+  streamFailed.value = true
+  emit('frame-error')
+}
 </script>
 
 <style scoped>
