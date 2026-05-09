@@ -85,7 +85,7 @@ class ArmIKConfig:
 
     # extra 最大角度，單位：degree
     max_extra_pitch_deg: float = 60.0
-    max_extra_yaw_deg: float = 30.0
+    max_extra_yaw_deg: float = 60.0
 
     # 每顆馬達的實體角度範圍。
     # 這裡的 min/max 是「實際送給馬達」的角度，不是 model angle。
@@ -829,8 +829,7 @@ class ArmIKHelper:
         activation = max(radial_activation, limit_activation)
 
         max_extra_pitch = math.radians(cfg.max_extra_pitch_deg) * activation
-        max_extra_yaw = math.radians(cfg.max_extra_yaw_deg) * activation
-
+        max_extra_yaw = math.radians(cfg.max_extra_yaw_deg)
         candidates = self._make_initial_candidates(
             target_y,
             target_z,
