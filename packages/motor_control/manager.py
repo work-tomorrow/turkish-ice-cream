@@ -62,8 +62,9 @@ class MotorManager:
             self.max_velocity_deg_s.update(max_velocity_deg_s)
 
         # Manager-side target memory.
-        # This is the value after clamp + speed limit.
+        # This is the logical value after clamp + speed limit.
         self.current_targets: dict[str, float] = {}
+        # Raw motor angle that upper-layer logical zero maps to.
         self.zero_offsets: dict[str, float] = {}
         for motor_id, motor in self.motors.items():
             current_angle = float(
@@ -188,12 +189,8 @@ class MotorManager:
 
         for current_motor_id in motor_ids:
             motor = self.motors[current_motor_id]
-            if hasattr(motor, "set_current_angle_zero"):
-                motor.set_current_angle_zero()
-                self.zero_offsets[current_motor_id] = 0.0
-            else:
-                physical_current = float(getattr(motor, "current_angle", 0.0))
-                self.zero_offsets[current_motor_id] += physical_current
+            physical_current = float(getattr(motor, "current_angle", 0.0))
+            self.zero_offsets[current_motor_id] = physical_current
             self.current_targets[current_motor_id] = 0.0
 
     def cleanup(self) -> None:

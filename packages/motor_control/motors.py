@@ -6,6 +6,7 @@ Pin numbers are BCM GPIO numbers, not physical board pin numbers.
 
 from __future__ import annotations
 
+import math
 import threading
 import time
 from typing import Any
@@ -146,11 +147,11 @@ class StepperMotor:
         self.step_pin = step_pin
         self.dir_pin = dir_pin
         self.enable_pin = enable_pin
-        self.min_angle = min_angle
-        self.max_angle = max_angle
-        self.home_angle = home_angle
-        self.current_angle = home_angle
-        self.target_angle = home_angle
+        self.min_angle = float(min_angle)
+        self.max_angle = float(max_angle)
+        self.home_angle = float(home_angle)
+        self.current_angle = self.home_angle
+        self.target_angle = self.home_angle
         self.moving = False
         self.ready = True
         self.last_error: str | None = None
@@ -160,12 +161,11 @@ class StepperMotor:
         self._gear_ratio = gear_ratio
         self._steps_per_second = max(1.0, float(steps_per_second))
         self._half_step_delay_s = 1.0 / (self._steps_per_second * 2.0)
-        self._current_steps = self._angle_to_steps(home_angle)
+        self._current_steps = self._angle_to_steps(self.home_angle)
         self._target_steps = self._current_steps
+        self._sync_angles_from_steps()
         self._closed = False
         self._stop_requested = False
-        self._pulse_active = False
-        self._zero_after_current_pulse = False
         self._condition = threading.Condition()
 
         GPIO = _gpio()
@@ -186,16 +186,13 @@ class StepperMotor:
         self._worker.start()
 
     def move_to(self, angle: float, *, duration_ms: int = 0) -> None:
-        angle = _clamp(float(angle), self.min_angle, self.max_angle)
-
         with self._condition:
             if self._closed:
                 raise RuntimeError(f"{self.id} has been cleaned up")
 
-            self.target_angle = angle
             self._target_steps = self._angle_to_steps(angle)
+            self.target_angle = self._steps_to_angle(self._target_steps)
             self._stop_requested = False
-            self._zero_after_current_pulse = False
             self.moving = self._target_steps != self._current_steps
             self.ready = True
             self.last_error = None
@@ -208,7 +205,7 @@ class StepperMotor:
         with self._condition:
             self._stop_requested = True
             self._target_steps = self._current_steps
-            self.target_angle = self.current_angle
+            self._sync_angles_from_steps()
             self.moving = False
             self._condition.notify_all()
 
@@ -241,20 +238,6 @@ class StepperMotor:
         if self.enable_pin is not None:
             GPIO.cleanup(self.enable_pin)
 
-    def set_current_angle_zero(self) -> None:
-        with self._condition:
-            self._stop_requested = True
-            if self._pulse_active:
-                self._zero_after_current_pulse = True
-            else:
-                self._current_steps = 0
-                self._target_steps = 0
-
-            self.current_angle = 0.0
-            self.target_angle = 0.0
-            self.moving = False
-            self._condition.notify_all()
-
     def _run_worker(self) -> None:
         while True:
             with self._condition:
@@ -267,7 +250,6 @@ class StepperMotor:
 
                 direction = 1 if self._target_steps > self._current_steps else -1
                 self.moving = True
-                self._pulse_active = True
 
             try:
                 self._enable_driver()
@@ -277,42 +259,26 @@ class StepperMotor:
                     self.ready = False
                     self.last_error = str(exc)
                     self._target_steps = self._current_steps
-                    self.target_angle = self.current_angle
+                    self._sync_angles_from_steps()
                     self.moving = False
-                    self._pulse_active = False
                     self._stop_requested = False
-                    self._zero_after_current_pulse = False
                     self._condition.notify_all()
                 self._disable_driver()
                 continue
 
             should_disable = False
             with self._condition:
-                self._pulse_active = False
+                self._current_steps += direction
+                self.current_angle = self._steps_to_angle(self._current_steps)
 
-                if self._zero_after_current_pulse:
-                    self._current_steps = 0
-                    self._target_steps = 0
-                    self.current_angle = 0.0
-                    self.target_angle = 0.0
+                if self._stop_requested:
+                    self._target_steps = self._current_steps
+                    self._sync_angles_from_steps()
                     self._stop_requested = False
-                    self._zero_after_current_pulse = False
-                else:
-                    self._current_steps += direction
-                    self.current_angle = _clamp(
-                        self._steps_to_angle(self._current_steps),
-                        self.min_angle,
-                        self.max_angle,
-                    )
-
-                    if self._stop_requested:
-                        self._target_steps = self._current_steps
-                        self.target_angle = self.current_angle
-                        self._stop_requested = False
 
                 self.moving = self._current_steps != self._target_steps
                 if not self.moving:
-                    self.target_angle = self.current_angle
+                    self._sync_angles_from_steps()
                     should_disable = True
 
                 self.ready = True
@@ -331,10 +297,29 @@ class StepperMotor:
         time.sleep(self._half_step_delay_s)
 
     def _angle_to_steps(self, angle: float) -> int:
-        return round(angle * self._steps_per_degree())
+        angle = _clamp(float(angle), self.min_angle, self.max_angle)
+        steps_per_degree = self._steps_per_degree()
+        raw_steps = angle * steps_per_degree
+        if raw_steps >= 0:
+            steps = math.floor(raw_steps + 0.5)
+        else:
+            steps = math.ceil(raw_steps - 0.5)
+
+        while self._raw_steps_to_angle(steps) < self.min_angle:
+            steps += 1
+        while self._raw_steps_to_angle(steps) > self.max_angle:
+            steps -= 1
+        return steps
 
     def _steps_to_angle(self, steps: int) -> float:
+        return _clamp(self._raw_steps_to_angle(steps), self.min_angle, self.max_angle)
+
+    def _raw_steps_to_angle(self, steps: int) -> float:
         return steps / self._steps_per_degree()
+
+    def _sync_angles_from_steps(self) -> None:
+        self.current_angle = self._steps_to_angle(self._current_steps)
+        self.target_angle = self._steps_to_angle(self._target_steps)
 
     def _steps_per_degree(self) -> float:
         return self._steps_per_rev * self._microsteps * self._gear_ratio / 360.0

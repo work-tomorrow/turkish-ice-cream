@@ -95,7 +95,8 @@ Rules:
 - `set_target_angles()` must clamp each logical angle into the motor's valid
   range.
 - `set_target_angles()` must apply per-motor speed limiting.
-- `set_target_angles()` may call low-level motor `move_to()` directly.
+- `MotorManager` is the only place that converts logical angles to raw motor
+  angles. Low-level motor `move_to()` receives raw angles.
 - The upper layer owns timing. Do not add a background worker inside
   `MotorManager`.
 - Do not add a movement queue unless the product requirement changes.
@@ -166,6 +167,8 @@ Notes:
   offset.
 - `current_targets` is manager-side target memory after clamp and speed limiting.
 - `set_current_angle_zero()` treats the current physical pose as logical zero.
+- Low-level motors keep raw `current_angle`, `target_angle`, `min_angle`, and
+  `max_angle`; do not reset or shift those values for calibration.
 
 ## Hard Rules
 

@@ -135,10 +135,27 @@ class MotorManagerTest(unittest.TestCase):
         state = self.manager.get_state()
         self.assertEqual(state["motors"]["m3"]["current_angle"], 0.0)
         self.assertEqual(state["motors"]["m3"]["target_angle"], 0.0)
+        self.assertEqual(state["motors"]["m3"]["min_angle"], -108.0)
+        self.assertEqual(state["motors"]["m3"]["max_angle"], 72.0)
+        self.assertEqual(self.manager.motors["m3"].min_angle, 0.0)
+        self.assertEqual(self.manager.motors["m3"].max_angle, 180.0)
 
         self.manager.set_target_angles({"m1": 0.0, "m2": 0.0, "m3": 3.0, "m4": 90.0})
         state = self.manager.get_state()
         self.assertEqual(state["motors"]["m3"]["current_angle"], 3.0)
+        self.assertEqual(self.manager.motors["m3"].current_angle, 111.0)
+
+    def test_set_current_angle_zero_replaces_existing_offset(self) -> None:
+        self.manager.set_target_angles({"m1": 0.0, "m2": 0.0, "m3": 108.0, "m4": 90.0})
+        self.manager.set_current_angle_zero("m3")
+        self.manager.set_target_angles({"m1": 0.0, "m2": 0.0, "m3": 3.0, "m4": 90.0})
+        self.manager.set_current_angle_zero("m3")
+
+        state = self.manager.get_state()
+        self.assertEqual(state["motors"]["m3"]["current_angle"], 0.0)
+        self.assertEqual(state["motors"]["m3"]["target_angle"], 0.0)
+        self.assertEqual(state["motors"]["m3"]["min_angle"], -111.0)
+        self.assertEqual(state["motors"]["m3"]["max_angle"], 69.0)
 
     def test_set_current_angle_zero_for_all_resets_all_logical_angles(self) -> None:
         self.manager.set_target_angles({"m1": 4.5, "m2": -4.5, "m3": 108.0, "m4": 72.0})
@@ -177,6 +194,56 @@ class FakeGPIO:
 
 
 class StepperMotorTest(unittest.TestCase):
+    def test_stepper_target_angle_comes_from_integer_steps(self) -> None:
+        fake_gpio = FakeGPIO()
+
+        with patch("motor_control.motors._gpio", return_value=fake_gpio):
+            motor = StepperMotor(
+                "m1",
+                step_pin=16,
+                dir_pin=20,
+                min_angle=-15.0,
+                max_angle=15.0,
+                steps_per_rev=36,
+                microsteps=1,
+                steps_per_second=1.0,
+            )
+
+            try:
+                motor.move_to(5.0)
+                state = motor.snapshot()
+
+                self.assertEqual(state.target_angle, 10.0)
+                self.assertLessEqual(state.target_angle, motor.max_angle)
+            finally:
+                motor.stop_now()
+                motor.cleanup()
+
+    def test_stepper_quantized_target_stays_inside_limits(self) -> None:
+        fake_gpio = FakeGPIO()
+
+        with patch("motor_control.motors._gpio", return_value=fake_gpio):
+            motor = StepperMotor(
+                "m1",
+                step_pin=16,
+                dir_pin=20,
+                min_angle=-15.0,
+                max_angle=15.0,
+                steps_per_rev=36,
+                microsteps=1,
+                steps_per_second=1.0,
+            )
+
+            try:
+                motor.move_to(15.0)
+                state = motor.snapshot()
+
+                self.assertEqual(state.target_angle, 10.0)
+                self.assertLessEqual(state.target_angle, motor.max_angle)
+            finally:
+                motor.stop_now()
+                motor.cleanup()
+
     def test_move_to_returns_while_worker_is_still_stepping(self) -> None:
         fake_gpio = FakeGPIO()
 
