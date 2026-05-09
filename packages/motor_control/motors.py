@@ -156,9 +156,16 @@ class StepperMotor:
         self.ready = True
         self.last_error: str | None = None
 
-        self._steps_per_rev = steps_per_rev
-        self._microsteps = microsteps
-        self._gear_ratio = gear_ratio
+        self._steps_per_degree = (
+            int(steps_per_rev) * int(microsteps) * float(gear_ratio) / 360.0
+        )
+        if self._steps_per_degree <= 0:
+            raise ValueError("steps_per_rev, microsteps, and gear_ratio must be positive")
+        self._min_steps = math.ceil(self.min_angle * self._steps_per_degree)
+        self._max_steps = math.floor(self.max_angle * self._steps_per_degree)
+        if self._min_steps > self._max_steps:
+            raise ValueError("Stepper angle range is smaller than one reachable step")
+
         self._steps_per_second = max(1.0, float(steps_per_second))
         self._half_step_delay_s = 1.0 / (self._steps_per_second * 2.0)
         self._current_steps = self._angle_to_steps(self.home_angle)
@@ -298,31 +305,21 @@ class StepperMotor:
 
     def _angle_to_steps(self, angle: float) -> int:
         angle = _clamp(float(angle), self.min_angle, self.max_angle)
-        steps_per_degree = self._steps_per_degree()
-        raw_steps = angle * steps_per_degree
-        if raw_steps >= 0:
-            steps = math.floor(raw_steps + 0.5)
-        else:
-            steps = math.ceil(raw_steps - 0.5)
-
-        while self._raw_steps_to_angle(steps) < self.min_angle:
-            steps += 1
-        while self._raw_steps_to_angle(steps) > self.max_angle:
-            steps -= 1
-        return steps
+        steps = self._round_steps(angle * self._steps_per_degree)
+        return max(self._min_steps, min(self._max_steps, steps))
 
     def _steps_to_angle(self, steps: int) -> float:
-        return _clamp(self._raw_steps_to_angle(steps), self.min_angle, self.max_angle)
-
-    def _raw_steps_to_angle(self, steps: int) -> float:
-        return steps / self._steps_per_degree()
+        return float(steps) / self._steps_per_degree
 
     def _sync_angles_from_steps(self) -> None:
         self.current_angle = self._steps_to_angle(self._current_steps)
         self.target_angle = self._steps_to_angle(self._target_steps)
 
-    def _steps_per_degree(self) -> float:
-        return self._steps_per_rev * self._microsteps * self._gear_ratio / 360.0
+    @staticmethod
+    def _round_steps(value: float) -> int:
+        if value >= 0:
+            return math.floor(value + 0.5)
+        return math.ceil(value - 0.5)
 
     def _enable_driver(self) -> None:
         if self.enable_pin is None:
