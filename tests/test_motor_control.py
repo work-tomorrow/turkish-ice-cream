@@ -32,6 +32,10 @@ class MotorManagerTest(unittest.TestCase):
         state = self.manager.get_state()
 
         self.assertEqual(set(state["motors"]), {"m1", "m2", "m3", "m4"})
+        self.assertEqual(
+            state["max_velocity_deg_s"],
+            {"m1": 45.0, "m2": 180.0, "m3": 180.0, "m4": 180.0},
+        )
         self.assertEqual(state["motors"]["m1"]["kind"], MotorKind.STEPPER)
         self.assertEqual(state["motors"]["m2"]["kind"], MotorKind.SERVO)
         self.assertEqual(state["motors"]["m3"]["kind"], MotorKind.SERVO)

@@ -3,11 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from core.app.lab_escape.common import (
-    Rect,
     Vec2,
     WorldConfig,
     clamp,
-    clamp_position,
     move_toward,
 )
 from core.app.lab_escape.state_machine import ArmStateMachine
@@ -28,17 +26,36 @@ class YZPosition:
 
 @dataclass(frozen=True)
 class LabEscapeControllerConfig:
-    vision_width_px: float = 640.0
-    vision_height_px: float = 480.0
-
-    # The lab escape algorithm is 2D. Its x axis maps to robot Y; its y axis
-    # maps to robot Z.
-    target_y_min_cm: float = -18.0
-    target_y_max_cm: float = 18.0
-    target_z_min_cm: float = -10.0
-    target_z_max_cm: float = 14.0
+    pixels_per_cm: float = 10.0
+    boundary_size_cm: float = 80.0
+    origin_to_left_boundary_cm: float = 40.0
+    origin_to_top_boundary_cm: float = 40.0
 
     max_xyz_step_cm: float = 1.8
+
+    @property
+    def vision_width_px(self) -> float:
+        return self.boundary_size_cm * self.pixels_per_cm
+
+    @property
+    def vision_height_px(self) -> float:
+        return self.boundary_size_cm * self.pixels_per_cm
+
+    @property
+    def target_y_min_cm(self) -> float:
+        return -self.origin_to_left_boundary_cm
+
+    @property
+    def target_y_max_cm(self) -> float:
+        return self.boundary_size_cm - self.origin_to_left_boundary_cm
+
+    @property
+    def target_z_min_cm(self) -> float:
+        return -(self.boundary_size_cm - self.origin_to_top_boundary_cm)
+
+    @property
+    def target_z_max_cm(self) -> float:
+        return self.origin_to_top_boundary_cm
 
 
 @dataclass(frozen=True)
@@ -48,17 +65,19 @@ class LabEscapeControllerResult:
     lab_state: str
     transition_reason: str
     hand_lab_pos: tuple[float, float] | None
+    visible: bool
+    planned_landing_xyz_cm: XYZPosition | None = None
 
 
 class LabEscapeController:
     """
-    Adapter around the lab escape state machine.
+    Adapter around the kosu Turkish escape state machine.
 
     The canonical XYZ frame is the robot frame:
     x = forward/back, y = left/right, z = up/down.
 
-    This class only converts robot-frame Y/Z to the 2D lab world and back.
-    It does not know motor ids, motor angles, FK, or IK.
+    The kosu algorithm is a 2D square workspace. Its x axis maps to robot Y,
+    and its y axis maps inversely to robot Z.
     """
 
     def __init__(self, config: LabEscapeControllerConfig | None = None) -> None:
@@ -91,7 +110,6 @@ class LabEscapeController:
             ice_pos=current_lab_pos,
             hand_pos=hand_lab_pos,
             dt=max(float(dt), 1e-3),
-            hand_sample_fresh=True,
         )
 
         next_yz = self._lab_to_robot_yz(algo_result.pos)
@@ -106,6 +124,14 @@ class LabEscapeController:
             y_cm=next_yz.y_cm,
             z_cm=next_yz.z_cm,
         )
+        planned_landing_xyz = (
+            self._lab_to_xyz(
+                algo_result.planned_landing,
+                current_x_cm=current_xyz_cm.x_cm,
+            )
+            if algo_result.planned_landing is not None
+            else None
+        )
 
         result = LabEscapeControllerResult(
             next_xyz_cm=next_xyz,
@@ -113,6 +139,8 @@ class LabEscapeController:
             lab_state=self.state_machine.state.name,
             transition_reason=self.state_machine.transition_reason,
             hand_lab_pos=self._vec_tuple(hand_lab_pos),
+            visible=bool(algo_result.visible),
+            planned_landing_xyz_cm=planned_landing_xyz,
         )
         self._last_result = result
         return result
@@ -122,20 +150,11 @@ class LabEscapeController:
         return self._last_result
 
     def _build_world_config(self, config: LabEscapeControllerConfig) -> WorldConfig:
-        width = int(round(config.vision_width_px))
-        height = int(round(config.vision_height_px))
         return WorldConfig(
-            width=width,
-            height=height,
-            control_period=0.10,
-            hand_radius=55.0,
-            ice_radius=22.0,
-            escape_trigger_distance=160.0,
-            close_distance=45.0,
-            boundary_enter_margin=80.0,
-            boundary_exit_margin=115.0,
-            min_safe_distance_extra=15.0,
-            blind_zone=Rect(width * 0.4, height * 0.35, width * 0.2, height * 0.3),
+            pixels_per_cm=config.pixels_per_cm,
+            boundary_size_cm=config.boundary_size_cm,
+            origin_to_left_boundary_cm=config.origin_to_left_boundary_cm,
+            origin_to_top_boundary_cm=config.origin_to_top_boundary_cm,
         )
 
     def _robot_yz_to_lab(self, position: YZPosition) -> Vec2:
@@ -149,40 +168,27 @@ class LabEscapeController:
             self.config.target_z_min_cm,
             self.config.target_z_max_cm,
         )
-
-        x_ratio = self._unlerp(
-            self.config.target_y_min_cm,
-            self.config.target_y_max_cm,
-            y_cm,
-        )
-        y_ratio = self._unlerp(
-            self.config.target_z_max_cm,
-            self.config.target_z_min_cm,
-            z_cm,
+        origin = self.world.origin()
+        return Vec2(
+            origin.x + y_cm * self.world.pixels_per_cm,
+            origin.y - z_cm * self.world.pixels_per_cm,
         )
 
-        return clamp_position(
-            Vec2(x_ratio * self.world.width, y_ratio * self.world.height),
-            self.world.ice_radius,
-            self.world.width,
-            self.world.height,
+    def _lab_to_xyz(self, pos: Vec2, *, current_x_cm: float) -> XYZPosition:
+        yz = self._lab_to_robot_yz(pos)
+        return XYZPosition(
+            x_cm=float(current_x_cm),
+            y_cm=yz.y_cm,
+            z_cm=yz.z_cm,
         )
 
     def _lab_to_robot_yz(self, pos: Vec2) -> YZPosition:
-        x_ratio = clamp(pos.x / self.world.width, 0.0, 1.0)
-        y_ratio = clamp(pos.y / self.world.height, 0.0, 1.0)
-
-        return YZPosition(
-            y_cm=self._lerp(
-                self.config.target_y_min_cm,
-                self.config.target_y_max_cm,
-                x_ratio,
-            ),
-            z_cm=self._lerp(
-                self.config.target_z_max_cm,
-                self.config.target_z_min_cm,
-                y_ratio,
-            ),
+        origin = self.world.origin()
+        return self._clamp_robot_yz(
+            YZPosition(
+                y_cm=(pos.x - origin.x) / self.world.pixels_per_cm,
+                z_cm=(origin.y - pos.y) / self.world.pixels_per_cm,
+            )
         )
 
     def _clamp_robot_yz(self, position: YZPosition) -> YZPosition:
@@ -212,16 +218,6 @@ class LabEscapeController:
             max_distance=max_distance,
         )
         return YZPosition(y_cm=next_pos.x, z_cm=next_pos.y)
-
-    @staticmethod
-    def _lerp(start: float, end: float, ratio: float) -> float:
-        return start + (end - start) * ratio
-
-    @staticmethod
-    def _unlerp(start: float, end: float, value: float) -> float:
-        if abs(end - start) < 1e-9:
-            return 0.0
-        return clamp((value - start) / (end - start), 0.0, 1.0)
 
     @staticmethod
     def _vec_tuple(pos: Vec2 | None) -> tuple[float, float] | None:

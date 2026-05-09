@@ -1,7 +1,9 @@
 import asyncio
 from dataclasses import dataclass
 import logging
+import math
 
+from core.app.config import settings
 from core.app.kinematics_helper import ArmIKConfig, ArmIKHelper, JointLimit, clamp
 from core.app.lab_escape_controller import (
     LabEscapeController,
@@ -30,6 +32,11 @@ JOINT_MODEL_CALIBRATION = {
     "J3": {"sign": 1.0, "zero_deg": 90.0},
     "J4": {"sign": 1.0, "zero_deg": 90.0},
 }
+
+
+VANISH_PHASE_IDLE = "idle"
+VANISH_PHASE_LIFTING = "lifting"
+VANISH_PHASE_LANDING = "landing"
 
 
 @dataclass(frozen=True)
@@ -89,6 +96,41 @@ class CameraCalibrationConfig:
         )
 
 
+@dataclass
+class VanishSequence:
+    phase: str = VANISH_PHASE_IDLE
+    landing_xyz_cm: XYZPosition | None = None
+    lift_cycles_remaining: int = 0
+    land_cycles_remaining: int = 0
+    landing_targets: dict[str, float] | None = None
+
+
+def compute_motion_cycles(
+    *,
+    start_targets: dict[str, float],
+    target_targets: dict[str, float],
+    max_velocity_deg_s: dict[str, float],
+    dt_s: float,
+) -> int:
+    """Compute how many controller ticks are needed under motor speed limits."""
+
+    safe_dt_s = max(float(dt_s), 1e-6)
+    cycles = 1
+    for motor_id, target in target_targets.items():
+        if motor_id not in start_targets:
+            continue
+
+        max_velocity = float(max_velocity_deg_s.get(motor_id, 180.0))
+        if max_velocity <= 0.0:
+            continue
+
+        max_delta = max_velocity * safe_dt_s
+        delta = abs(float(target) - float(start_targets[motor_id]))
+        cycles = max(cycles, math.ceil(delta / max_delta))
+
+    return max(cycles, 1)
+
+
 def build_default_ik_helper() -> ArmIKHelper:
     return ArmIKHelper(
         build_ik_config(
@@ -136,6 +178,8 @@ class RobotController:
             escape_config,
         )
         self.ik = build_default_ik_helper()
+        self.vanish_motor_targets = dict(settings.vanish_motor_targets)
+        self._vanish_sequence = VanishSequence()
         self._was_started = False
 
     async def run(self) -> None:
@@ -144,6 +188,7 @@ class RobotController:
                 if self._was_started:
                     self.escape_controller.reset()
                     self.ik.reset()
+                    self._reset_vanish_sequence()
                     self._was_started = False
                 await asyncio.sleep(CONTROL_INTERVAL_SECONDS)
                 continue
@@ -174,6 +219,13 @@ class RobotController:
     def compute_targets(self, *, hand: Hand, motor_state: dict) -> dict[str, float]:
         self._sync_ik_limits(motor_state)
         current_targets = self._current_motor_targets(motor_state)
+
+        if self._vanish_sequence.phase != VANISH_PHASE_IDLE:
+            return self._run_vanish_sequence(
+                current_targets=current_targets,
+                motor_state=motor_state,
+            )
+
         current_xyz = self._current_xyz(motor_state)
         hand_robot_yz = self._calibrate_hand_yz(hand)
 
@@ -183,11 +235,38 @@ class RobotController:
             dt=float(motor_state.get("dt_s", CONTROL_INTERVAL_SECONDS)),
         )
 
+        if not result.visible and result.planned_landing_xyz_cm is not None:
+            self._start_vanish_sequence(
+                landing_xyz_cm=result.planned_landing_xyz_cm,
+                current_targets=current_targets,
+                motor_state=motor_state,
+            )
+            return self._run_vanish_sequence(
+                current_targets=current_targets,
+                motor_state=motor_state,
+            )
+
+        targets = self._targets_for_xyz(
+            result.next_xyz_cm,
+            current_targets=current_targets,
+            status=result.status,
+            lab_state=result.lab_state,
+        )
+        return targets if targets is not None else current_targets
+
+    def _targets_for_xyz(
+        self,
+        xyz: XYZPosition,
+        *,
+        current_targets: dict[str, float],
+        status: str,
+        lab_state: str,
+    ) -> dict[str, float] | None:
         try:
             ik_result = self.ik.solve_xyz(
-                target_x_cm=result.next_xyz_cm.x_cm,
-                target_y_cm=result.next_xyz_cm.y_cm,
-                target_z_cm=result.next_xyz_cm.z_cm,
+                target_x_cm=xyz.x_cm,
+                target_y_cm=xyz.y_cm,
+                target_z_cm=xyz.z_cm,
                 reachable_error_threshold_cm=REACHABLE_ERROR_THRESHOLD_CM,
             )
         except Exception as exc:
@@ -195,25 +274,25 @@ class RobotController:
             self.ik.reset()
             logger.debug(
                 "escape controller held targets: state=%s xyz=(%.2f, %.2f, %.2f) status=%s error=%s",
-                result.lab_state,
-                result.next_xyz_cm.x_cm,
-                result.next_xyz_cm.y_cm,
-                result.next_xyz_cm.z_cm,
-                result.status,
+                lab_state,
+                xyz.x_cm,
+                xyz.y_cm,
+                xyz.z_cm,
+                status,
                 exc,
             )
-            return current_targets
+            return None
 
         if not ik_result.reachable:
             logger.warning(
                 "IK target unreachable; holding current motor targets: target=(%.2f, %.2f, %.2f) err=%.2f status=%s",
-                result.next_xyz_cm.x_cm,
-                result.next_xyz_cm.y_cm,
-                result.next_xyz_cm.z_cm,
+                xyz.x_cm,
+                xyz.y_cm,
+                xyz.z_cm,
                 ik_result.error_cm,
-                result.status,
+                status,
             )
-            return current_targets
+            return None
 
         targets = self._joint_targets_to_motor_targets(
             ik_result.motor_targets(),
@@ -221,15 +300,130 @@ class RobotController:
         )
         logger.debug(
             "escape controller: state=%s xyz=(%.2f, %.2f, %.2f) reachable=%s err=%.2f status=%s",
-            result.lab_state,
-            result.next_xyz_cm.x_cm,
-            result.next_xyz_cm.y_cm,
-            result.next_xyz_cm.z_cm,
+            lab_state,
+            xyz.x_cm,
+            xyz.y_cm,
+            xyz.z_cm,
             ik_result.reachable,
             ik_result.error_cm,
-            result.status,
+            status,
         )
         return targets
+
+    def _start_vanish_sequence(
+        self,
+        *,
+        landing_xyz_cm: XYZPosition,
+        current_targets: dict[str, float],
+        motor_state: dict,
+    ) -> None:
+        vanish_targets = self._complete_vanish_targets(current_targets)
+        lift_cycles = self._cycles_for_motion(
+            start_targets=current_targets,
+            target_targets=vanish_targets,
+            motor_state=motor_state,
+        )
+        self._vanish_sequence = VanishSequence(
+            phase=VANISH_PHASE_LIFTING,
+            landing_xyz_cm=landing_xyz_cm,
+            lift_cycles_remaining=lift_cycles,
+        )
+        logger.debug(
+            "starting vanish sequence: lift_cycles=%d landing_xyz=(%.2f, %.2f, %.2f)",
+            lift_cycles,
+            landing_xyz_cm.x_cm,
+            landing_xyz_cm.y_cm,
+            landing_xyz_cm.z_cm,
+        )
+
+    def _run_vanish_sequence(
+        self,
+        *,
+        current_targets: dict[str, float],
+        motor_state: dict,
+    ) -> dict[str, float]:
+        sequence = self._vanish_sequence
+
+        if sequence.phase == VANISH_PHASE_LIFTING:
+            targets = self._complete_vanish_targets(current_targets)
+            sequence.lift_cycles_remaining -= 1
+            if sequence.lift_cycles_remaining <= 0:
+                sequence.phase = VANISH_PHASE_LANDING
+            return targets
+
+        if sequence.phase == VANISH_PHASE_LANDING:
+            if sequence.landing_xyz_cm is None:
+                self._reset_vanish_sequence()
+                return current_targets
+
+            if sequence.landing_targets is None:
+                landing_targets = self._targets_for_xyz(
+                    sequence.landing_xyz_cm,
+                    current_targets=current_targets,
+                    status="vanish landing",
+                    lab_state="BOUNDARY_ESCAPE",
+                )
+                if landing_targets is None:
+                    logger.warning(
+                        "Vanish landing IK failed; holding current motor targets"
+                    )
+                    self._reset_vanish_sequence()
+                    return current_targets
+
+                vanish_targets = self._complete_vanish_targets(current_targets)
+                sequence.landing_targets = landing_targets
+                sequence.land_cycles_remaining = self._cycles_for_motion(
+                    start_targets=vanish_targets,
+                    target_targets=landing_targets,
+                    motor_state=motor_state,
+                )
+                logger.debug(
+                    "vanish landing prepared: land_cycles=%d targets=%s",
+                    sequence.land_cycles_remaining,
+                    landing_targets,
+                )
+
+            sequence.land_cycles_remaining -= 1
+            targets = dict(sequence.landing_targets)
+            if sequence.land_cycles_remaining <= 0:
+                self._reset_vanish_sequence()
+            return targets
+
+        self._reset_vanish_sequence()
+        return current_targets
+
+    def _complete_vanish_targets(
+        self,
+        base_targets: dict[str, float],
+    ) -> dict[str, float]:
+        targets = dict(base_targets)
+        for motor_id, target in self.vanish_motor_targets.items():
+            if motor_id in targets:
+                targets[motor_id] = float(target)
+        return targets
+
+    def _cycles_for_motion(
+        self,
+        *,
+        start_targets: dict[str, float],
+        target_targets: dict[str, float],
+        motor_state: dict,
+    ) -> int:
+        return compute_motion_cycles(
+            start_targets=start_targets,
+            target_targets=target_targets,
+            max_velocity_deg_s={
+                motor_id: float(max_velocity)
+                for motor_id, max_velocity in motor_state.get(
+                    "max_velocity_deg_s",
+                    {},
+                ).items()
+            },
+            dt_s=float(motor_state.get("dt_s", CONTROL_INTERVAL_SECONDS)),
+        )
+
+    def _reset_vanish_sequence(self) -> None:
+        self._vanish_sequence = VanishSequence()
 
     def _calibrate_hand_yz(self, hand: Hand) -> YZPosition | None:
         if not hand.detected or hand.x is None or hand.y is None:
@@ -298,6 +492,13 @@ class RobotController:
 
     @staticmethod
     def _current_motor_targets(motor_state: dict) -> dict[str, float]:
+        current_targets = motor_state.get("current_targets")
+        if current_targets:
+            return {
+                motor_id: float(target)
+                for motor_id, target in current_targets.items()
+            }
+
         motors = motor_state.get("motors", {})
         return {
             motor_id: float(state.get("target_angle", state.get("current_angle", 0.0)))

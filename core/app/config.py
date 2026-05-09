@@ -2,10 +2,14 @@ import os
 from pathlib import Path
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 CORE_ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 load_dotenv(CORE_ENV_FILE)
+
+
+def _env_float(name: str, default: float) -> float:
+    return float(os.getenv(name, str(default)))
 
 
 class Settings(BaseModel):
@@ -26,6 +30,18 @@ class Settings(BaseModel):
     vision_stale_timeout_seconds: float = float(
         os.getenv("VISION_STALE_TIMEOUT_SECONDS", "1.0")
     )
+    vanish_m1_deg: float = Field(
+        default_factory=lambda: _env_float("VANISH_M1_DEG", 0.0)
+    )
+    vanish_m2_deg: float = Field(
+        default_factory=lambda: _env_float("VANISH_M2_DEG", 90.0)
+    )
+    vanish_m3_deg: float = Field(
+        default_factory=lambda: _env_float("VANISH_M3_DEG", 90.0)
+    )
+    vanish_m4_deg: float = Field(
+        default_factory=lambda: _env_float("VANISH_M4_DEG", 90.0)
+    )
     cors_allow_origin_regex: str = (
         r"^https?://("
         r"localhost|"
@@ -35,6 +51,15 @@ class Settings(BaseModel):
         r"172\.(?:1[6-9]|2\d|3[0-1])(?:\.\d{1,3}){2}"
         r")(?::\d+)?$"
     )
+
+    @property
+    def vanish_motor_targets(self) -> dict[str, float]:
+        return {
+            "m1": self.vanish_m1_deg,
+            "m2": self.vanish_m2_deg,
+            "m3": self.vanish_m3_deg,
+            "m4": self.vanish_m4_deg,
+        }
 
 
 settings = Settings()

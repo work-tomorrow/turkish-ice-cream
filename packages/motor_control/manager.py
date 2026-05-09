@@ -171,6 +171,7 @@ class MotorManager:
         return {
             "dt_s": self.dt_s,
             "current_targets": dict(self.current_targets),
+            "max_velocity_deg_s": dict(self.max_velocity_deg_s),
             "motors": {
                 motor_id: self._get_motor_state(motor_id, motor)
                 for motor_id, motor in self.motors.items()
