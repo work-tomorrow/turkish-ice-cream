@@ -53,9 +53,9 @@ class MotorManager:
         # You can tune these later based on the real robot.
         self.max_velocity_deg_s = {
             "m1": 3600.0,
-            "m2": 3600.0,
-            "m3": 3600.0,
-            "m4": 3600.0,
+            "m2": 300.0,
+            "m3": 300.0,
+            "m4": 300.0,
         }
 
         if max_velocity_deg_s is not None:
