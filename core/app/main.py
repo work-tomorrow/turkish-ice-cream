@@ -21,6 +21,8 @@ async def lifespan(app: FastAPI):
     app.state.last_hand_result_at = None
     app.state.motor_manager = MotorManager()
     app.state.motor_manager_ready = False
+    app.state.circle_demo_running = False
+    app.state.circle_demo_task = None
 
     app.state.vision_stale_task = asyncio.create_task(
         vision_stale_monitor(
@@ -42,6 +44,13 @@ async def lifespan(app: FastAPI):
         app.state.controller_task.cancel()
         with suppress(asyncio.CancelledError):
             await app.state.controller_task
+
+        circle_task = getattr(app.state, "circle_demo_task", None)
+        if circle_task is not None and not circle_task.done():
+            app.state.circle_demo_running = False
+            circle_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await circle_task
 
         app.state.motor_manager.cleanup()
 

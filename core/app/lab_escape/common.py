@@ -101,10 +101,10 @@ class WorldConfig:
     origin_to_left_boundary_cm: float = 12.5
     origin_to_top_boundary_cm: float = 12.5
 
-    hand_radius_cm: float = 5.5
-    ice_radius_cm: float = 2.2
+    hand_radius_cm: float = 3.0
+    ice_radius_cm: float = 2.0
 
-    escape_trigger_distance_cm: float = 12.0
+    escape_trigger_distance_cm: float = 4.0
     close_distance_cm: float = 4.5
 
     boundary_enter_margin_cm: float = 2.5
@@ -120,7 +120,7 @@ class WorldConfig:
     landing_min_distance_cm: float = 8.0
     landing_boundary_margin_cm: float = 3.0
     boundary_escape_distance_cm: float = 2.0
-    boundary_escape_max_target_distance_cm: float = 12.0
+    boundary_escape_max_target_distance_cm: float = 5.0
     idle_exit_distance_cm: float = 15.0
     contact_escape_distance_cm: float = 9.0
     flat_escape_min_angle_deg: float = 100.0
@@ -139,25 +139,34 @@ class WorldConfig:
 
     @property
     def y_min_cm(self) -> float:
+        """Minimum robot Y (cm): ``-origin_to_left_boundary_cm``."""
         return -self.origin_to_left_boundary_cm
 
     @property
-    def y_max_cm(self) -> float:
+    def origin_to_right_boundary_cm(self) -> float:
+        """Positive span from workspace origin to the right (+Y) boundary."""
         return self.boundary_size_cm - self.origin_to_left_boundary_cm
+
+    @property
+    def y_max_cm(self) -> float:
+        """Maximum robot Y (cm): same magnitude as ``origin_to_right_boundary_cm``."""
+        return self.origin_to_right_boundary_cm
+
+    @property
+    def origin_to_bottom_boundary_cm(self) -> float:
+        """Positive span from workspace origin to the lower (-Z) boundary."""
+        return self.boundary_size_cm - self.origin_to_top_boundary_cm
 
     @property
     def z_min_cm(self) -> float:
-        return -(self.boundary_size_cm - self.origin_to_top_boundary_cm)
+        """Minimum robot Z (cm): ``-origin_to_bottom_boundary_cm`` (below origin)."""
+        return -self.origin_to_bottom_boundary_cm
 
     @property
     def z_max_cm(self) -> float:
+        """Maximum robot Z (cm): ``origin_to_top_boundary_cm`` (above origin)."""
         return self.origin_to_top_boundary_cm
 
-    def origin_to_right_boundary_cm(self) -> float:
-        return self.boundary_size_cm - self.origin_to_left_boundary_cm
-
-    def origin_to_bottom_boundary_cm(self) -> float:
-        return self.boundary_size_cm - self.origin_to_top_boundary_cm
 
 
 ACTIVE_COLOR = (120, 190, 255)

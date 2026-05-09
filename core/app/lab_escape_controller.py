@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 
 from core.app.lab_escape.common import (
     Vec2,
@@ -33,7 +32,6 @@ class LabEscapeControllerConfig:
     origin_to_top_boundary_cm: float = 12.5
 
     max_xyz_step_cm: float = 1.8
-    target_radius_cm: float = 0.0
 
     @property
     def vision_width_px(self) -> float:
@@ -45,18 +43,32 @@ class LabEscapeControllerConfig:
 
     @property
     def target_y_min_cm(self) -> float:
+        """Minimum robot Y (cm): ``-origin_to_left_boundary_cm``."""
         return -self.origin_to_left_boundary_cm
 
     @property
-    def target_y_max_cm(self) -> float:
+    def origin_to_right_boundary_cm(self) -> float:
+        """Positive span from workspace origin to the right (+Y) boundary."""
         return self.boundary_size_cm - self.origin_to_left_boundary_cm
 
     @property
+    def target_y_max_cm(self) -> float:
+        """Maximum robot Y (cm): ``origin_to_right_boundary_cm``."""
+        return self.origin_to_right_boundary_cm
+
+    @property
+    def origin_to_bottom_boundary_cm(self) -> float:
+        """Positive span from workspace origin to the lower (-Z) boundary."""
+        return self.boundary_size_cm - self.origin_to_top_boundary_cm
+
+    @property
     def target_z_min_cm(self) -> float:
-        return -(self.boundary_size_cm - self.origin_to_top_boundary_cm)
+        """Minimum robot Z (cm): ``-origin_to_bottom_boundary_cm`` (below origin)."""
+        return -self.origin_to_bottom_boundary_cm
 
     @property
     def target_z_max_cm(self) -> float:
+        """Maximum robot Z (cm): ``origin_to_top_boundary_cm`` (above origin)."""
         return self.origin_to_top_boundary_cm
 
 
@@ -182,7 +194,15 @@ class LabEscapeController:
         return self._clamp_robot_yz(YZPosition(y_cm=pos.x, z_cm=pos.y))
 
     def _clamp_robot_yz(self, position: YZPosition) -> YZPosition:
-        square_clamped = YZPosition(
+        """
+        Clamp to the axis-aligned robot Y–Z workspace.
+
+        This must match the rectangular bounds used by the lab state machine
+        (`WorldConfig` / algorithm clamping). A secondary circular clamp would
+        remap valid square-corner poses inward and disagree with the workspace
+        model the algorithms assume.
+        """
+        return YZPosition(
             y_cm=clamp(
                 position.y_cm,
                 self.config.target_y_min_cm,
@@ -193,20 +213,6 @@ class LabEscapeController:
                 self.config.target_z_min_cm,
                 self.config.target_z_max_cm,
             ),
-        )
-
-        radius = float(self.config.target_radius_cm)
-        distance_from_origin = math.hypot(
-            square_clamped.y_cm,
-            square_clamped.z_cm,
-        )
-        if radius <= 0.0 or distance_from_origin <= radius:
-            return square_clamped
-
-        scale = radius / distance_from_origin
-        return YZPosition(
-            y_cm=square_clamped.y_cm * scale,
-            z_cm=square_clamped.z_cm * scale,
         )
 
     @staticmethod

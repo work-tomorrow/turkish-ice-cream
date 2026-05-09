@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import core.app.main as core_main
 from core.app import router
+from core.app.controller import RobotController
 from core.app.main import app
 from core.app.models import (
     Hand,
@@ -21,6 +22,26 @@ from core.app.vision_state import (
 )
 from motor_control import MotorManager
 from motor_control.mock_motors import build_mock_motors
+
+
+class CircleDemoApiTest(unittest.TestCase):
+    def test_circle_demo_conflict_when_session_started(self) -> None:
+        from fastapi import HTTPException
+
+        with _request_context() as request:
+            request.app.state.robot_state = RobotState.started
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(router.start_circle_demo(request, 25.0, 12.0))
+            self.assertEqual(ctx.exception.status_code, 409)
+
+    def test_session_conflict_when_circle_demo_running(self) -> None:
+        from fastapi import HTTPException
+
+        with _request_context() as request:
+            request.app.state.circle_demo_running = True
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(router.create_session(request))
+            self.assertEqual(ctx.exception.status_code, 409)
 
 
 class CoreApiMotorTest(unittest.TestCase):
@@ -40,6 +61,8 @@ class CoreApiMotorTest(unittest.TestCase):
         schema = app.openapi()
 
         paths = schema["paths"]
+        self.assertIn("/debug/circle-demo/start", paths)
+        self.assertIn("/debug/circle-demo/stop", paths)
         self.assertIn("/motors", paths)
         self.assertNotIn("patch", schema["paths"]["/session"])
         self.assertNotIn("/motors/calibration", paths)
@@ -54,6 +77,7 @@ class CoreApiMotorTest(unittest.TestCase):
         schemas = schema["components"]["schemas"]
         self.assertIn("MotorsResponse", schemas)
         self.assertIn("MotorStatus", schemas)
+        self.assertIn("CircleDemoResponse", schemas)
         self.assertIn("MotorJogRequest", schemas)
         self.assertIn("MotorJogResponse", schemas)
         self.assertIn("MotorJogResult", schemas)
@@ -259,8 +283,12 @@ class _request_context:
             last_hand_result_at=None,
             motor_manager=self.motor_manager,
             motor_manager_ready=False,
+            circle_demo_running=False,
+            circle_demo_task=None,
         )
-        return SimpleNamespace(app=SimpleNamespace(state=state))
+        app_ns = SimpleNamespace(state=state)
+        state.controller = RobotController(app_ns)
+        return SimpleNamespace(app=app_ns)
 
     def __exit__(self, *args):
         self.motor_manager.cleanup()

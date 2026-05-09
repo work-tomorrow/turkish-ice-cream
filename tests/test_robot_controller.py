@@ -16,8 +16,10 @@ from core.app.lab_escape.algo_variants import TurkishBoundaryVanishLandingAlgo
 from core.app.lab_escape.common import Vec2, WorldConfig
 from core.app.lab_escape_controller import (
     LabEscapeController,
+    LabEscapeControllerConfig,
     LabEscapeControllerResult,
     XYZPosition,
+    YZPosition,
 )
 from core.app.models import Hand
 
@@ -61,6 +63,32 @@ class RobotControllerTest(unittest.TestCase):
         self.assertIn("visible", result_fields)
         self.assertIn("planned_landing_xyz_cm", result_fields)
         self.assertNotIn("targets", result_fields)
+
+    def test_clamp_robot_yz_matches_square_workspace_only(self) -> None:
+        """Corners inside the rectangle must not be pulled toward the origin."""
+        cfg = LabEscapeControllerConfig()
+        ctl = LabEscapeController(cfg)
+        corner = YZPosition(y_cm=cfg.target_y_max_cm, z_cm=cfg.target_z_max_cm)
+        clamped = ctl._clamp_robot_yz(corner)
+        self.assertAlmostEqual(clamped.y_cm, corner.y_cm)
+        self.assertAlmostEqual(clamped.z_cm, corner.z_cm)
+
+    def test_lab_escape_workspace_z_and_y_spans_match_boundary_size(self) -> None:
+        """Origin splits each axis so max - min equals the square edge length."""
+        cfg = LabEscapeControllerConfig(
+            boundary_size_cm=25.0,
+            origin_to_left_boundary_cm=10.0,
+            origin_to_top_boundary_cm=8.0,
+        )
+        self.assertAlmostEqual(
+            cfg.target_y_max_cm - cfg.target_y_min_cm,
+            cfg.boundary_size_cm,
+        )
+        self.assertAlmostEqual(
+            cfg.target_z_max_cm - cfg.target_z_min_cm,
+            cfg.boundary_size_cm,
+        )
+        self.assertAlmostEqual(cfg.target_z_min_cm, -cfg.origin_to_bottom_boundary_cm)
 
     def test_core_lab_escape_imports_are_packaged(self) -> None:
         for module in (

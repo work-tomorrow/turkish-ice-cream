@@ -1,10 +1,15 @@
 import asyncio
+import logging
+import math
+from contextlib import suppress
 
-from fastapi import APIRouter, HTTPException, Request, WebSocket
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request, WebSocket
 from fastapi import WebSocketDisconnect
 from pydantic import ValidationError
 
+from core.app.controller import REACHABLE_ERROR_THRESHOLD_CM
 from core.app.models import (
+    CircleDemoResponse,
     HandDetectionResult,
     MessageResponse,
     MotorDirection,
@@ -33,6 +38,71 @@ from core.app.vision_state import apply_hand_detection, mark_vision_disconnected
 api_router = APIRouter()
 
 DEFAULT_STEP_DEGREES = 3.0
+
+logger = logging.getLogger(__name__)
+
+CIRCLE_DEMO_TICK_S = 0.1
+
+
+async def _circle_demo_loop(
+    app: FastAPI,
+    *,
+    radius_cm: float,
+    period_s: float,
+) -> None:
+    """
+    在 robot frame 的 Y–Z 平面上，讓末端以 (0,0) 為圓心、半徑 radius_cm
+    畫圓；X 由目前機構的 Y–Z-only IK 決定，與主互動控制邏輯相同。
+    """
+    loop = asyncio.get_running_loop()
+    t0 = loop.time()
+    controller = app.state.controller
+    motor_manager = app.state.motor_manager
+
+    try:
+        while app.state.circle_demo_running:
+            motor_state = motor_manager.get_state()
+            controller._sync_ik_limits(motor_state)
+            current_targets = controller._current_motor_targets(motor_state)
+
+            elapsed = loop.time() - t0
+            theta = (2.0 * math.pi * elapsed) / period_s
+            y_cm = radius_cm * math.cos(theta)
+            z_cm = radius_cm * math.sin(theta)
+
+            try:
+                ik_result = controller.ik.solve_xyz(
+                    target_x_cm=0.0,
+                    target_y_cm=y_cm,
+                    target_z_cm=z_cm,
+                    reachable_error_threshold_cm=REACHABLE_ERROR_THRESHOLD_CM,
+                )
+            except Exception:
+                logger.warning("Circle demo IK failed; holding targets", exc_info=True)
+                await asyncio.sleep(CIRCLE_DEMO_TICK_S)
+                continue
+
+            if not ik_result.reachable:
+                logger.warning(
+                    "Circle demo target not reachable: y=%.2f z=%.2f err=%.2f",
+                    y_cm,
+                    z_cm,
+                    ik_result.error_cm,
+                )
+                await asyncio.sleep(CIRCLE_DEMO_TICK_S)
+                continue
+
+            targets = controller._joint_targets_to_motor_targets(
+                ik_result.motor_targets(),
+                base_targets=current_targets,
+            )
+            motor_manager.set_target(targets)
+            await asyncio.sleep(CIRCLE_DEMO_TICK_S)
+    except asyncio.CancelledError:
+        raise
+    finally:
+        app.state.circle_demo_running = False
+        app.state.circle_demo_task = None
 
 
 def _status_payload(request: Request | WebSocket) -> StatusResponse:
@@ -124,6 +194,11 @@ async def create_session(
     request: Request,
 ) -> SessionCreateResponse:
     """Create or return the single active demo session."""
+    if getattr(request.app.state, "circle_demo_running", False):
+        raise HTTPException(
+            status_code=409,
+            detail="Stop the circle demo before starting a session.",
+        )
     if request.app.state.running:
         return SessionCreateResponse(
             ok=True,
@@ -314,6 +389,77 @@ async def zero_motor(
 async def get_session(request: Request) -> SessionResponse:
     """Return the current single demo session state."""
     return _session_payload(request)
+
+
+@api_router.post(
+    "/debug/circle-demo/start",
+    response_model=CircleDemoResponse,
+    tags=["debug"],
+)
+async def start_circle_demo(
+    request: Request,
+    radius_cm: float = Query(
+        25.0,
+        gt=0,
+        le=50,
+        description="Y–Z plane circle radius in cm, centered at robot-frame origin.",
+    ),
+    period_s: float = Query(
+        12.0,
+        gt=0.5,
+        le=120.0,
+        description="Seconds per full revolution.",
+    ),
+) -> CircleDemoResponse:
+    """Test-only: move the end-effector on a circle (radius_cm) in the Y–Z plane."""
+    if request.app.state.robot_state is RobotState.started:
+        raise HTTPException(
+            status_code=409,
+            detail="Stop the interactive session before starting the circle demo.",
+        )
+    if getattr(request.app.state, "circle_demo_running", False):
+        raise HTTPException(
+            status_code=409,
+            detail="Circle demo is already running.",
+        )
+
+    _ensure_motor_manager_ready(request)
+
+    request.app.state.circle_demo_running = True
+    request.app.state.circle_demo_task = asyncio.create_task(
+        _circle_demo_loop(
+            request.app,
+            radius_cm=radius_cm,
+            period_s=period_s,
+        ),
+    )
+    return CircleDemoResponse(
+        ok=True,
+        active=True,
+        message="Circle demo started.",
+        radius_cm=radius_cm,
+        period_s=period_s,
+    )
+
+
+@api_router.delete(
+    "/debug/circle-demo/stop",
+    response_model=CircleDemoResponse,
+    tags=["debug"],
+)
+async def stop_circle_demo(request: Request) -> CircleDemoResponse:
+    """Stop the circle demo background loop."""
+    request.app.state.circle_demo_running = False
+    task = getattr(request.app.state, "circle_demo_task", None)
+    if task is not None and not task.done():
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
+    return CircleDemoResponse(
+        ok=True,
+        active=False,
+        message="Circle demo stopped.",
+    )
 
 
 @api_router.websocket("/ws/hand-ingest")

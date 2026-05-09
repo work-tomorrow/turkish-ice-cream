@@ -146,3 +146,11 @@ class SessionDeleteResponse(BaseModel):
     ok: bool
     session: SessionActiveResponse
     robot_state: RobotState
+
+
+class CircleDemoResponse(BaseModel):
+    ok: bool
+    active: bool
+    message: str = ""
+    radius_cm: float | None = None
+    period_s: float | None = None
