@@ -160,7 +160,9 @@ class StepperMotor:
             int(steps_per_rev) * int(microsteps) * float(gear_ratio) / 360.0
         )
         if self._steps_per_degree <= 0:
-            raise ValueError("steps_per_rev, microsteps, and gear_ratio must be positive")
+            raise ValueError(
+                "steps_per_rev, microsteps, and gear_ratio must be positive"
+            )
         self._min_steps = math.ceil(self.min_angle * self._steps_per_degree)
         self._max_steps = math.floor(self.max_angle * self._steps_per_degree)
         if self._min_steps > self._max_steps:
