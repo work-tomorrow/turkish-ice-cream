@@ -24,7 +24,7 @@
       <el-button :icon="RefreshLeft" :loading="busy === 'reset'" @click="$emit('reset')">
         Reset
       </el-button>
-      <el-button type="warning" :icon="Close" :loading="busy === 'stop'" @click="$emit('stop')">
+      <el-button type="danger" :icon="Close" :loading="busy === 'stop'" @click="$emit('stop')">
         Stop
       </el-button>
     </div>

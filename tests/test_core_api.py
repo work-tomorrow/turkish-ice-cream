@@ -46,6 +46,7 @@ class CoreApiMotorTest(unittest.TestCase):
         self.assertIn("/motors/zero", paths)
         self.assertNotIn("/actions", paths)
         self.assertNotIn("/actions/zero", paths)
+        self.assertNotIn("/emergency-stop", paths)
 
         schemas = schema["components"]["schemas"]
         self.assertIn("MotorsResponse", schemas)
@@ -63,6 +64,8 @@ class CoreApiMotorTest(unittest.TestCase):
         self.assertNotIn("ActionResult", schemas)
         self.assertNotIn("ZeroAngleResponse", schemas)
         self.assertNotIn("ActionName", schemas)
+        self.assertNotIn("EmergencyStopSetResponse", schemas)
+        self.assertNotIn("EmergencyStopClearResponse", schemas)
 
     def test_status_response_is_structured_without_session_counters(self) -> None:
         schema = app.openapi()
@@ -79,7 +82,7 @@ class CoreApiMotorTest(unittest.TestCase):
             )
             self.assertEqual(
                 payload["system"],
-                {"ready": True, "emergency_stopped": False},
+                {"ready": True},
             )
             self.assertEqual(payload["robot"], {"state": "idle"})
             self.assertEqual(
@@ -203,8 +206,10 @@ class CoreApiMotorTest(unittest.TestCase):
             payload = response.model_dump()
             self.assertEqual(payload["action"]["current_angle"], 3.0)
 
-    def test_emergency_stop_is_instant_stop_not_latched(self) -> None:
+    def test_session_stop_stops_motors_and_interaction(self) -> None:
         with _request_context() as request:
+            request.app.state.running = True
+            request.app.state.robot_state = RobotState.started
             asyncio.run(
                 router.jog_motor(
                     "m3",
@@ -216,7 +221,7 @@ class CoreApiMotorTest(unittest.TestCase):
                 )
             )
 
-            asyncio.run(router.set_emergency_stop(request))
+            stop_response = asyncio.run(router.delete_session(request))
             response = asyncio.run(
                 router.jog_motor(
                     "m3",
@@ -228,6 +233,8 @@ class CoreApiMotorTest(unittest.TestCase):
                 )
             )
 
+            self.assertFalse(stop_response.session.active)
+            self.assertFalse(request.app.state.running)
             payload = response.model_dump()
             self.assertEqual(payload["action"]["current_angle"], 96.0)
 

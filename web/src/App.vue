@@ -30,17 +30,10 @@
         />
         <MotorCalibrationPanel
           :motors="motors"
-          :emergency-stopped="status.system.emergency_stopped"
           :busy="busy"
           @move-motors="moveMotors"
           @jog-motor="jogMotor"
           @zero-motor="zeroMotor"
-        />
-        <EmergencyPanel
-          :emergency-stopped="status.system.emergency_stopped"
-          :busy="busy"
-          @stop="setEmergencyStop"
-          @clear="clearEmergencyStop"
         />
       </section>
     </el-main>
@@ -52,7 +45,6 @@ import axios from 'axios'
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import AppHeader from './components/AppHeader.vue'
-import EmergencyPanel from './components/EmergencyPanel.vue'
 import MotorCalibrationPanel from './components/MotorCalibrationPanel.vue'
 import SessionPanel from './components/SessionPanel.vue'
 import StatusPanel from './components/StatusPanel.vue'
@@ -61,7 +53,6 @@ import VisionPanel from './components/VisionPanel.vue'
 const defaultStatus = {
   system: {
     ready: true,
-    emergency_stopped: false,
   },
   robot: {
     state: 'idle',
@@ -232,16 +223,6 @@ const zeroMotor = (motorId) =>
     )
   })
 
-const setEmergencyStop = () =>
-  withBusy('emergency', async () => {
-    await axios.post('/emergency-stop')
-  })
-
-const clearEmergencyStop = () =>
-  withBusy('clear-emergency', async () => {
-    await axios.delete('/emergency-stop')
-  })
-
 const reloadFrame = () => {
   frameError.value = false
   frameVersion.value = Date.now()
@@ -299,7 +280,7 @@ onBeforeUnmount(() => {
 }
 
 .control-grid {
-  grid-template-columns: minmax(280px, 0.8fr) minmax(320px, 1fr) minmax(260px, 0.75fr);
+  grid-template-columns: minmax(260px, 0.72fr) minmax(380px, 1.28fr);
 }
 
 @media (max-width: 980px) {

@@ -47,7 +47,6 @@ class HandDetectionResult(BaseModel):
 
 class StatusSystem(BaseModel):
     ready: bool
-    emergency_stopped: bool
 
 
 class StatusRobot(BaseModel):
@@ -163,17 +162,4 @@ class SessionPatchResponse(BaseModel):
 class SessionDeleteResponse(BaseModel):
     ok: bool
     session: SessionActiveResponse
-    robot_state: RobotState
-
-
-class EmergencyStopSetResponse(BaseModel):
-    ok: bool
-    emergency_stopped: bool
-    running: bool
-    robot_state: RobotState
-
-
-class EmergencyStopClearResponse(BaseModel):
-    ok: bool
-    emergency_stopped: bool
     robot_state: RobotState

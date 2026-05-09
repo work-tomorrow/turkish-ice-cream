@@ -159,19 +159,10 @@ class MotorManager:
                 motor_id, motor
             )
 
-    def clear_emergency_stop(self) -> None:
-        """Compatibility no-op for the old clear operation."""
-
-    def reset_emergency_stop(self) -> None:
-        """Alias for clear_emergency_stop()."""
-
-        self.clear_emergency_stop()
-
     def get_state(self) -> dict[str, Any]:
         """Return simple manager + motor state."""
 
         return {
-            "emergency_stopped": False,
             "dt_s": self.dt_s,
             "current_targets": dict(self.current_targets),
             "motors": {

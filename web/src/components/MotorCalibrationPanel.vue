@@ -7,7 +7,7 @@
           <el-button
             size="small"
             type="primary"
-            :disabled="emergencyStopped || motors.length === 0"
+            :disabled="motors.length === 0"
             :loading="busy === 'move-motors'"
             @click="emitAllTargets"
           >
@@ -15,7 +15,6 @@
           </el-button>
           <el-button
             size="small"
-            :disabled="emergencyStopped"
             :loading="busy === 'zero-all'"
             @click="$emit('zero-motor')"
           >
@@ -41,12 +40,11 @@
             :max="motor.max_angle"
             :step="1"
             :precision="1"
-            :disabled="emergencyStopped || busy === 'move-motors'"
+            :disabled="busy === 'move-motors'"
             controls-position="right"
           />
           <el-button
             type="primary"
-            :disabled="emergencyStopped"
             :loading="busy === 'move-motors'"
             @click="emitSingleTarget(motor.id)"
           >
@@ -56,14 +54,12 @@
 
         <div class="motor-controls">
           <el-button
-            :disabled="emergencyStopped"
             :loading="busy === `${motor.id}-negative`"
             @click="$emit('jog-motor', { motorId: motor.id, direction: 'negative' })"
           >
             -{{ motor.step_degrees }} deg
           </el-button>
           <el-button
-            :disabled="emergencyStopped"
             :loading="busy === `${motor.id}-positive`"
             @click="$emit('jog-motor', { motorId: motor.id, direction: 'positive' })"
           >
@@ -71,7 +67,6 @@
           </el-button>
           <el-button
             type="primary"
-            :disabled="emergencyStopped"
             :loading="busy === `${motor.id}-zero`"
             @click="$emit('zero-motor', motor.id)"
           >
@@ -89,10 +84,6 @@ import { reactive, watch } from 'vue'
 const props = defineProps({
   motors: {
     type: Array,
-    required: true,
-  },
-  emergencyStopped: {
-    type: Boolean,
     required: true,
   },
   busy: {

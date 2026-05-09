@@ -169,8 +169,7 @@ desktop vision service:
 ```json
 {
   "system": {
-    "ready": true,
-    "emergency_stopped": false
+    "ready": true
   },
   "robot": {
     "state": "idle"
@@ -187,7 +186,7 @@ desktop vision service:
 }
 ```
 
-`robot.state` is one of `idle`, `started`, `stopping`, or `error`. Session counters such as `tease_count` and `max_tease` stay under `/session`.
+`robot.state` is one of `idle`, `started`, `stopping`, or `error`. Session counters such as `tease_count` and `max_tease` stay under `/session`. `DELETE /session` is the single stop command: it stops the current interaction and immediately stops all motors.
 
 ### Other Commands
 

@@ -5,8 +5,6 @@ from fastapi import WebSocketDisconnect
 from pydantic import ValidationError
 
 from core.app.models import (
-    EmergencyStopClearResponse,
-    EmergencyStopSetResponse,
     HandDetectionResult,
     MessageResponse,
     MotorDirection,
@@ -45,7 +43,6 @@ def _status_payload(request: Request | WebSocket) -> StatusResponse:
     return StatusResponse(
         system=StatusSystem(
             ready=bool(getattr(request.app.state, "vision_ready", False)),
-            emergency_stopped=False,
         ),
         robot=StatusRobot(state=request.app.state.robot_state),
         vision=StatusVision(hand_detected=hand.detected, hand=hand),
@@ -67,10 +64,6 @@ def _session_summary(request: Request) -> SessionSummary:
         max_tease=request.app.state.max_tease,
         tease_count=request.app.state.tease_count,
     )
-
-
-def _ensure_not_emergency_stopped(request: Request) -> None:
-    return
 
 
 def _ensure_motor_id(request: Request, motor_id: str) -> None:
@@ -139,7 +132,6 @@ async def create_session(
     request: Request,
 ) -> SessionCreateResponse:
     """Create or return the single active demo session."""
-    _ensure_not_emergency_stopped(request)
     if request.app.state.running:
         return SessionCreateResponse(
             ok=True,
@@ -160,9 +152,6 @@ async def update_session(
     request: Request,
 ) -> SessionPatchResponse:
     """Pause, resume, or reset the current demo session."""
-    if req.active is True:
-        _ensure_not_emergency_stopped(request)
-
     if req.reset:
         request.app.state.tease_count = 0
     if req.active is not None:
@@ -176,9 +165,10 @@ async def update_session(
 
 @api_router.delete("/session", response_model=SessionDeleteResponse, tags=["session"])
 async def delete_session(request: Request) -> SessionDeleteResponse:
-    """Stop the current demo session and return the robot to home."""
+    """Stop the current demo session and all motors."""
     request.app.state.robot_state = RobotState.stopping
     request.app.state.running = False
+    request.app.state.motor_manager.emergency_stop()
     request.app.state.robot_state = RobotState.idle
     return SessionDeleteResponse(
         ok=True,
@@ -206,7 +196,6 @@ async def jog_motor(
     request: Request,
 ) -> MotorJogResponse:
     """Move one motor by a small relative angle for initial calibration."""
-    _ensure_not_emergency_stopped(request)
     _ensure_motor_id(request, motor_id)
     _ensure_motor_manager_ready(request)
 
@@ -258,7 +247,6 @@ async def set_motor_targets(
     request: Request,
 ) -> MotorTargetResponse:
     """Update logical target angles for one or more motors."""
-    _ensure_not_emergency_stopped(request)
     _ensure_motor_manager_ready(request)
 
     manager_state = request.app.state.motor_manager.get_state()
@@ -301,7 +289,6 @@ async def set_motor_targets(
 @api_router.post("/motors/zero", response_model=MotorZeroResponse, tags=["motors"])
 async def zero_all_motors(request: Request) -> MotorZeroResponse:
     """Save the current motor positions as the absolute zero calibration."""
-    _ensure_not_emergency_stopped(request)
     _ensure_motor_manager_ready(request)
 
     motor_ids = list(request.app.state.motor_manager.motors)
@@ -328,7 +315,6 @@ async def zero_motor(
     request: Request,
 ) -> MotorZeroResponse:
     """Save one motor's current position as the absolute zero calibration."""
-    _ensure_not_emergency_stopped(request)
     _ensure_motor_id(request, motor_id)
     _ensure_motor_manager_ready(request)
 
@@ -349,39 +335,6 @@ async def zero_motor(
 async def get_session(request: Request) -> SessionResponse:
     """Return the current single demo session state."""
     return _session_payload(request)
-
-
-@api_router.post(
-    "/emergency-stop",
-    response_model=EmergencyStopSetResponse,
-    tags=["emergency-stop"],
-)
-async def set_emergency_stop(request: Request) -> EmergencyStopSetResponse:
-    """Immediately stop all motors without creating a blocked state."""
-    request.app.state.running = False
-    request.app.state.motor_manager.emergency_stop()
-    request.app.state.robot_state = RobotState.idle
-    return EmergencyStopSetResponse(
-        ok=True,
-        emergency_stopped=False,
-        running=False,
-        robot_state=request.app.state.robot_state,
-    )
-
-
-@api_router.delete(
-    "/emergency-stop",
-    response_model=EmergencyStopClearResponse,
-    tags=["emergency-stop"],
-)
-async def clear_emergency_stop(request: Request) -> EmergencyStopClearResponse:
-    """Compatibility no-op for the old clear endpoint."""
-    request.app.state.motor_manager.clear_emergency_stop()
-    return EmergencyStopClearResponse(
-        ok=True,
-        emergency_stopped=False,
-        robot_state=request.app.state.robot_state,
-    )
 
 
 @api_router.get("/vision/frame", tags=["vision"])
