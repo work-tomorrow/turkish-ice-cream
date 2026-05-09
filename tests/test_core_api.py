@@ -76,7 +76,9 @@ class CoreApiMotorTest(unittest.TestCase):
     def test_status_response_is_structured_without_session_counters(self) -> None:
         schema = app.openapi()
         status_schema = schema["components"]["schemas"]["StatusResponse"]
-        self.assertEqual(set(status_schema["properties"]), {"system", "robot", "vision"})
+        self.assertEqual(
+            set(status_schema["properties"]), {"system", "robot", "vision"}
+        )
 
         with _request_context() as request:
             response = asyncio.run(router.get_status(request))
@@ -117,6 +119,7 @@ class CoreApiMotorTest(unittest.TestCase):
             self.assertTrue(payload["vision"]["hand_detected"])
             self.assertEqual(payload["vision"]["hand"]["x"], 30.0)
             self.assertEqual(payload["vision"]["hand"]["y"], 50.0)
+            self.assertEqual(payload["vision"]["hand"]["area"], 2400.0)
             self.assertEqual(payload["vision"]["hand"]["confidence"], 0.75)
 
     def test_remote_vision_disconnect_and_timeout_clear_hand(self) -> None:

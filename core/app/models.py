@@ -29,6 +29,7 @@ class Hand(BaseModel):
     detected: bool = False
     x: Optional[float] = None
     y: Optional[float] = None
+    area: Optional[float] = None
     confidence: Optional[float] = None
 
 

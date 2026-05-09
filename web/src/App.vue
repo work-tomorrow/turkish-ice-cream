@@ -20,12 +20,7 @@
       </section>
 
       <section class="control-grid">
-        <SessionPanel
-          :session="session"
-          :busy="busy"
-          @start="startSession"
-          @stop="stopSession"
-        />
+        <SessionPanel :session="session" :busy="busy" @start="startSession" @stop="stopSession" />
         <MotorCalibrationPanel
           :motors="motors"
           :busy="busy"
@@ -61,6 +56,7 @@ const defaultStatus = {
       detected: false,
       x: null,
       y: null,
+      area: null,
       confidence: null,
     },
   },
@@ -112,9 +108,16 @@ const lastUpdated = computed(() => {
 const applyStatus = (payload) => {
   status.system = payload.system || { ...defaultStatus.system }
   status.robot = payload.robot || { ...defaultStatus.robot }
-  status.vision = payload.vision || {
+  const incomingVision = payload.vision || {
     ...defaultStatus.vision,
     hand: { ...defaultStatus.vision.hand },
+  }
+  status.vision = {
+    ...incomingVision,
+    hand: {
+      ...defaultStatus.vision.hand,
+      ...(incomingVision.hand || {}),
+    },
   }
   apiOnline.value = true
   updatedAt.value = new Date()

@@ -21,8 +21,15 @@
     </div>
 
     <el-descriptions :column="2" border class="hand-table">
-      <el-descriptions-item label="X">{{ displayValue(status.vision.hand?.x) }}</el-descriptions-item>
-      <el-descriptions-item label="Y">{{ displayValue(status.vision.hand?.y) }}</el-descriptions-item>
+      <el-descriptions-item label="X">{{
+        displayValue(status.vision.hand?.x)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="Y">{{
+        displayValue(status.vision.hand?.y)
+      }}</el-descriptions-item>
+      <el-descriptions-item label="Area">
+        {{ displayValue(status.vision.hand?.area) }}
+      </el-descriptions-item>
       <el-descriptions-item label="Confidence">
         {{ displayValue(status.vision.hand?.confidence) }}
       </el-descriptions-item>

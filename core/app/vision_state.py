@@ -8,15 +8,21 @@ def hand_from_detection(result: HandDetectionResult) -> Hand:
     if not result.detected or result.box is None:
         return Hand()
 
+    width = max(0.0, float(result.box.x2) - float(result.box.x1))
+    height = max(0.0, float(result.box.y2) - float(result.box.y1))
+
     return Hand(
         detected=True,
         x=(result.box.x1 + result.box.x2) / 2,
         y=(result.box.y1 + result.box.y2) / 2,
+        area=width * height,
         confidence=float(result.confidence),
     )
 
 
-def apply_hand_detection(state, result: HandDetectionResult, now: float | None = None) -> None:
+def apply_hand_detection(
+    state, result: HandDetectionResult, now: float | None = None
+) -> None:
     state.hand = hand_from_detection(result)
     state.vision_ready = True
     state.last_hand_result_at = time.monotonic() if now is None else now
@@ -37,7 +43,9 @@ def vision_is_stale(state, timeout_seconds: float, now: float | None = None) -> 
     return current - float(last_seen) > timeout_seconds
 
 
-async def vision_stale_monitor(app, timeout_seconds: float, interval_seconds: float = 0.2) -> None:
+async def vision_stale_monitor(
+    app, timeout_seconds: float, interval_seconds: float = 0.2
+) -> None:
     while True:
         if getattr(app.state, "vision_ready", False) and vision_is_stale(
             app.state,
