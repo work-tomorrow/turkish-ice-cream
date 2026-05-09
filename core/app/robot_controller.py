@@ -161,6 +161,14 @@ def ik_config_from_motors(motors: dict) -> ArmIKConfig:
             for joint, motor_id in JOINT_TO_MOTOR_ID.items()
             if motor_id in motors
         },
+        joint_signs={
+            joint: float(calibration["sign"])
+            for joint, calibration in JOINT_MODEL_CALIBRATION.items()
+        },
+        joint_zero_degs={
+            joint: float(calibration["zero_deg"])
+            for joint, calibration in JOINT_MODEL_CALIBRATION.items()
+        },
         max_iterations=80,
         stop_error_cm=0.05,
         step_scale=0.4,
@@ -168,12 +176,9 @@ def ik_config_from_motors(motors: dict) -> ArmIKConfig:
 
 
 def _joint_limit_from_motor_state(joint: str, motor_state: dict) -> JointLimit:
-    calibration = JOINT_MODEL_CALIBRATION[joint]
     return JointLimit(
         min_deg=float(motor_state["min_angle"]),
         max_deg=float(motor_state["max_angle"]),
-        sign=float(calibration["sign"]),
-        zero_deg=float(calibration["zero_deg"]),
     )
 
 
