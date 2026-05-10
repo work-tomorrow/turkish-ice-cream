@@ -37,7 +37,7 @@ class MotorManager:
         self,
         motors: dict[str, Any] | None = None,
         *,
-        dt_s: float = 0.2,
+        dt_s: float = 0.1,
         max_velocity_deg_s: dict[str, float] | None = None,
     ) -> None:
         if dt_s <= 0:

@@ -140,16 +140,16 @@ class LabEscapeConfig:
     blind_zone_detection_margin_cm: float = 2.5
 
     # Motion speeds in the lab YZ plane.
-    normal_speed_cm_s: float = 50.0
-    boundary_speed_cm_s: float = 50.0
-    retreat_speed_cm_s: float = 50.0
-    idle_speed_cm_s: float = 30.0
+    normal_speed_cm_s: float = 25.0
+    boundary_speed_cm_s: float = 25.0
+    retreat_speed_cm_s: float = 25.0
+    idle_speed_cm_s: float = 10.0
 
     blind_zone: Rect | None = None
 
     def __post_init__(self) -> None:
         if self.blind_zone is None:
-            self.blind_zone = Rect(24, 25, 1, 1)
+            self.blind_zone = Rect(-3, -2, 6, 3)
 
     @property
     def y_min_cm(self) -> float:
