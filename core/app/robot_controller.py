@@ -13,7 +13,7 @@ from core.app.models import Hand, RobotState
 
 logger = logging.getLogger(__name__)
 
-CONTROL_INTERVAL_SECONDS = 0.1
+CONTROL_INTERVAL_SECONDS = 0.2
 REACHABLE_ERROR_THRESHOLD_CM = 10.0
 
 JOINT_TO_MOTOR_ID = {
