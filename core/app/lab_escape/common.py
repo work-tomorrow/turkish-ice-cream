@@ -113,10 +113,10 @@ class LabEscapeConfig:
         ImagePointPx,
         ImagePointPx,
     ] = (
-        (170.0, 165.0),
-        (450.0, 200.0),
-        (450.0, 350.0),
-        (160.0, 350.0),
+        (100.0, 165.0),
+        (500.0, 200.0),
+        (500.0, 350.0),
+        (100.0, 350.0),
     )
     min_hand_confidence: float = 0.2
 
