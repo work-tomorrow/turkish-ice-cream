@@ -97,26 +97,26 @@ class LabEscapeConfig:
     converted into the same Y/Z workspace before the state machine runs.
     """
 
-    # Workspace geometry: 20cm wide x 10cm tall rectangle above the origin.
-    boundary_size_cm: float = 30.0
-    boundary_height_cm: float = 15.0
-    origin_to_left_boundary_cm: float = 15.0
-    origin_to_top_boundary_cm: float = 15.0
+    # Workspace geometry: y in [-25, 25], z in [-5, 25].
+    boundary_size_cm: float = 50.0
+    boundary_height_cm: float = 30.0
+    origin_to_left_boundary_cm: float = 25.0
+    origin_to_top_boundary_cm: float = 25.0
 
     # Camera mapping. Calibrate these four image points to the physical
     # workspace corners, in this order:
     # top-left, top-right, bottom-right, bottom-left.
-    pixels_per_cm: float = 40.0
+    pixels_per_cm: float = 10.0
     image_workspace_points_px: tuple[
         ImagePointPx,
         ImagePointPx,
         ImagePointPx,
         ImagePointPx,
     ] = (
-        (0.0, 0.0),
-        (800.0, 0.0),
-        (800.0, 400.0),
-        (0.0, 400.0),
+        (170.0, 165.0),
+        (450.0, 200.0),
+        (450.0, 350.0),
+        (160.0, 350.0),
     )
     min_hand_confidence: float = 0.2
 
@@ -124,8 +124,8 @@ class LabEscapeConfig:
     max_command_step_cm: float = 20.0
 
     # Object sizes.
-    hand_radius_cm: float = 1.0
-    ice_radius_cm: float = 1.0
+    hand_radius_cm: float = 3.0
+    ice_radius_cm: float = 3.0
 
     # State thresholds. These are the main knobs you are expected to tune.
     escape_trigger_distance_cm: float = 0.0
@@ -140,16 +140,16 @@ class LabEscapeConfig:
     blind_zone_detection_margin_cm: float = 2.5
 
     # Motion speeds in the lab YZ plane.
-    normal_speed_cm_s: float = 5.0
-    boundary_speed_cm_s: float = 5.0
-    retreat_speed_cm_s: float = 5.0
-    idle_speed_cm_s: float = 3.0
+    normal_speed_cm_s: float = 25.0
+    boundary_speed_cm_s: float = 25.0
+    retreat_speed_cm_s: float = 25.0
+    idle_speed_cm_s: float = 10.0
 
     blind_zone: Rect | None = None
 
     def __post_init__(self) -> None:
         if self.blind_zone is None:
-            self.blind_zone = Rect(-3.75, -5.625, 7.5, 11.25)
+            self.blind_zone = Rect(-3, -2, 6, 3)
 
     @property
     def y_min_cm(self) -> float:

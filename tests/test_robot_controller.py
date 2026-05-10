@@ -105,29 +105,38 @@ class RobotControllerTest(unittest.TestCase):
     def test_affine_calibration_maps_pixels_to_robot_yz_workspace(self) -> None:
         controller = RobotController(SimpleNamespace())
         config = controller.escape.config
-        self.assertEqual(config.vision_width_px, 800.0)
-        self.assertEqual(config.vision_height_px, 400.0)
+        self.assertEqual(config.vision_width_px, 500.0)
+        self.assertEqual(config.vision_height_px, 300.0)
 
         top_left = controller._calibrate_hand_yz(
-            Hand(detected=True, x=0.0, y=0.0, confidence=1.0)
+            Hand(detected=True, x=172.0, y=165.0, confidence=1.0)
+        )
+        top_right = controller._calibrate_hand_yz(
+            Hand(detected=True, x=450.0, y=200.0, confidence=1.0)
         )
         bottom_right = controller._calibrate_hand_yz(
-            Hand(
-                detected=True,
-                x=config.vision_width_px,
-                y=config.vision_height_px,
-                confidence=1.0,
-            )
+            Hand(detected=True, x=450.0, y=350.0, confidence=1.0)
+        )
+        bottom_left = controller._calibrate_hand_yz(
+            Hand(detected=True, x=160.0, y=350.0, confidence=1.0)
         )
 
         self.assertIsNotNone(top_left)
+        self.assertIsNotNone(top_right)
         self.assertIsNotNone(bottom_right)
+        self.assertIsNotNone(bottom_left)
         assert top_left is not None
+        assert top_right is not None
         assert bottom_right is not None
-        self.assertEqual(top_left.y_cm, -10.0)
-        self.assertEqual(top_left.z_cm, 10.0)
-        self.assertEqual(bottom_right.y_cm, 10.0)
-        self.assertEqual(bottom_right.z_cm, 0.0)
+        assert bottom_left is not None
+        self.assertAlmostEqual(top_left.y_cm, -25.0)
+        self.assertAlmostEqual(top_left.z_cm, 25.0)
+        self.assertAlmostEqual(top_right.y_cm, 25.0)
+        self.assertAlmostEqual(top_right.z_cm, 25.0)
+        self.assertAlmostEqual(bottom_right.y_cm, 25.0)
+        self.assertAlmostEqual(bottom_right.z_cm, -5.0)
+        self.assertAlmostEqual(bottom_left.y_cm, -25.0)
+        self.assertAlmostEqual(bottom_left.z_cm, -5.0)
 
     def test_escape_controller_and_state_machine_share_one_config(self) -> None:
         config = LabEscapeConfig(
@@ -139,8 +148,8 @@ class RobotControllerTest(unittest.TestCase):
 
         self.assertIs(controller.config, config)
         self.assertIs(controller.machine.config, config)
-        self.assertEqual(config.vision_width_px, 200.0)
-        self.assertEqual(config.target_y_min_cm, -10.0)
+        self.assertEqual(config.vision_width_px, 500.0)
+        self.assertEqual(config.target_y_min_cm, -25.0)
 
     def test_motion_cycles_use_angle_delta_velocity_and_dt(self) -> None:
         self.assertEqual(
