@@ -496,8 +496,8 @@ def _motor_state(max_velocity_deg_s=None):
             "m1": {
                 "current_angle": 0.0,
                 "target_angle": 0.0,
-                "min_angle": -45.0,
-                "max_angle": 45.0,
+                "min_angle": 0,
+                "max_angle": 0,
             },
             "m2": {
                 "current_angle": 90.0,

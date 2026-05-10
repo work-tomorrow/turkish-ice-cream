@@ -43,10 +43,10 @@ class Settings(BaseModel):
         default_factory=lambda: _env_float("VANISH_M4_DEG", 90.0)
     )
     ik_j1_min_deg: float = Field(
-        default_factory=lambda: _env_float("IK_J1_MIN_DEG", -45.0)
+        default_factory=lambda: _env_float("IK_J1_MIN_DEG", 0.0)
     )
     ik_j1_max_deg: float = Field(
-        default_factory=lambda: _env_float("IK_J1_MAX_DEG", 45.0)
+        default_factory=lambda: _env_float("IK_J1_MAX_DEG", 0.0)
     )
     ik_j2_min_deg: float = Field(
         default_factory=lambda: _env_float("IK_J2_MIN_DEG", -30.0)

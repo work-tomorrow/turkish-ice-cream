@@ -92,9 +92,7 @@ class MotorManagerTest(unittest.TestCase):
         manager = MotorManager(motors=build_mock_motors(), dt_s=0.1)
         self.addCleanup(manager.cleanup)
 
-        manager.set_target_angles(
-            {"m1": 180.0, "m2": 180.0, "m3": 0.0, "m4": 180.0}
-        )
+        manager.set_target_angles({"m1": 180.0, "m2": 180.0, "m3": 0.0, "m4": 180.0})
         state = manager.get_state()
 
         self.assertEqual(state["motors"]["m2"]["current_angle"], 120.0)
@@ -102,9 +100,7 @@ class MotorManagerTest(unittest.TestCase):
         self.assertEqual(state["motors"]["m4"]["current_angle"], 120.0)
 
     def test_home_all_moves_to_physical_home_after_zero_redefinition(self) -> None:
-        self.manager.set_target_angles(
-            {"m1": 45.0, "m2": -45.0, "m3": 120.0, "m4": 60.0}
-        )
+        self.manager.set_target_angles({"m1": 0, "m2": 0, "m3": 120.0, "m4": 60.0})
         self.manager.set_current_angle_zero("m3")
 
         self.manager.home_all()
