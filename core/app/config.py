@@ -42,6 +42,30 @@ class Settings(BaseModel):
     vanish_m4_deg: float = Field(
         default_factory=lambda: _env_float("VANISH_M4_DEG", 90.0)
     )
+    ik_j1_min_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J1_MIN_DEG", -45.0)
+    )
+    ik_j1_max_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J1_MAX_DEG", 45.0)
+    )
+    ik_j2_min_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J2_MIN_DEG", -30.0)
+    )
+    ik_j2_max_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J2_MAX_DEG", 90.0)
+    )
+    ik_j3_min_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J3_MIN_DEG", -60.0)
+    )
+    ik_j3_max_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J3_MAX_DEG", 60.0)
+    )
+    ik_j4_min_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J4_MIN_DEG", -60.0)
+    )
+    ik_j4_max_deg: float = Field(
+        default_factory=lambda: _env_float("IK_J4_MAX_DEG", 60.0)
+    )
     cors_allow_origin_regex: str = (
         r"^https?://("
         r"localhost|"
@@ -59,6 +83,15 @@ class Settings(BaseModel):
             "m2": self.vanish_m2_deg,
             "m3": self.vanish_m3_deg,
             "m4": self.vanish_m4_deg,
+        }
+
+    @property
+    def ik_joint_limits_deg(self) -> dict[str, tuple[float, float]]:
+        return {
+            "J1": (self.ik_j1_min_deg, self.ik_j1_max_deg),
+            "J2": (self.ik_j2_min_deg, self.ik_j2_max_deg),
+            "J3": (self.ik_j3_min_deg, self.ik_j3_max_deg),
+            "J4": (self.ik_j4_min_deg, self.ik_j4_max_deg),
         }
 
 

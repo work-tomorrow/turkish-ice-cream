@@ -139,28 +139,39 @@ def motion_cycles(
     return max(cycles, 1)
 
 
-def default_ik_helper() -> ArmIKHelper:
+def default_ik_helper(
+    ik_joint_limits_deg: dict[str, tuple[float, float]] | None = None,
+) -> ArmIKHelper:
     return ArmIKHelper(
         ik_config_from_motors(
-            {
-                "m1": {"min_angle": -45.0, "max_angle": 45.0},
-                "m2": {"min_angle": 45.0, "max_angle": 135.0},
-                "m3": {"min_angle": 45.0, "max_angle": 135.0},
-                "m4": {"min_angle": 45.0, "max_angle": 135.0},
-            }
+            {},
+            ik_joint_limits_deg=ik_joint_limits_deg or settings.ik_joint_limits_deg,
         )
     )
 
 
-def ik_config_from_motors(motors: dict) -> ArmIKConfig:
-    return ArmIKConfig(
-        max_extra_pitch_deg=12.0,
-        max_extra_yaw_deg=10.0,
-        joint_limits={
-            joint: _joint_limit_from_motor_state(joint, motors[motor_id])
+def ik_config_from_motors(
+    motors: dict,
+    *,
+    ik_joint_limits_deg: dict[str, tuple[float, float]] | None = None,
+) -> ArmIKConfig:
+    if ik_joint_limits_deg is None:
+        joint_limits = {
+            joint: _joint_limit_from_motor_state(motors[motor_id])
             for joint, motor_id in JOINT_TO_MOTOR_ID.items()
             if motor_id in motors
-        },
+        }
+    else:
+        joint_limits = {
+            joint: _joint_limit_from_range(*ik_joint_limits_deg[joint])
+            for joint in JOINT_TO_MOTOR_ID
+            if joint in ik_joint_limits_deg
+        }
+
+    return ArmIKConfig(
+        max_extra_pitch_deg=30.0,
+        max_extra_yaw_deg=60.0,
+        joint_limits=joint_limits,
         joint_signs={
             joint: float(calibration["sign"])
             for joint, calibration in JOINT_MODEL_CALIBRATION.items()
@@ -175,10 +186,17 @@ def ik_config_from_motors(motors: dict) -> ArmIKConfig:
     )
 
 
-def _joint_limit_from_motor_state(joint: str, motor_state: dict) -> JointLimit:
+def _joint_limit_from_motor_state(motor_state: dict) -> JointLimit:
     return JointLimit(
         min_deg=float(motor_state["min_angle"]),
         max_deg=float(motor_state["max_angle"]),
+    )
+
+
+def _joint_limit_from_range(min_deg: float, max_deg: float) -> JointLimit:
+    return JointLimit(
+        min_deg=float(min_deg),
+        max_deg=float(max_deg),
     )
 
 
@@ -190,7 +208,8 @@ class RobotController:
         self.camera_calibration = CameraCalibrationConfig.from_escape_config(
             escape_config,
         )
-        self.ik = default_ik_helper()
+        self.ik_joint_limits_deg = dict(settings.ik_joint_limits_deg)
+        self.ik = default_ik_helper(self.ik_joint_limits_deg)
         self.vanish_motor_targets = dict(settings.vanish_motor_targets)
         self._vanish_sequence = VanishSequence()
         self._was_started = False
@@ -488,15 +507,13 @@ class RobotController:
 
     def _sync_ik_limits(self, motor_state: dict) -> None:
         motors = motor_state.get("motors", {})
-        if not all(
-            motor_id in motors
-            and "min_angle" in motors[motor_id]
-            and "max_angle" in motors[motor_id]
-            for motor_id in JOINT_TO_MOTOR_ID.values()
-        ):
+        if not all(motor_id in motors for motor_id in JOINT_TO_MOTOR_ID.values()):
             return
 
-        next_config = ik_config_from_motors(motors)
+        next_config = ik_config_from_motors(
+            motors,
+            ik_joint_limits_deg=self.ik_joint_limits_deg,
+        )
         current_config = getattr(self.ik, "config", None)
         if (
             current_config is not None

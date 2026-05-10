@@ -97,15 +97,16 @@ class LabEscapeConfig:
     converted into the same Y/Z workspace before the state machine runs.
     """
 
-    # Workspace geometry: centered 50cm x 50cm square, y/z in [-25, 25].
-    boundary_size_cm: float = 20.0
-    origin_to_left_boundary_cm: float = 10.0
-    origin_to_top_boundary_cm: float = 10.0
+    # Workspace geometry: 20cm wide x 10cm tall rectangle above the origin.
+    boundary_size_cm: float = 30.0
+    boundary_height_cm: float = 15.0
+    origin_to_left_boundary_cm: float = 15.0
+    origin_to_top_boundary_cm: float = 15.0
 
     # Camera mapping. Calibrate these four image points to the physical
     # workspace corners, in this order:
     # top-left, top-right, bottom-right, bottom-left.
-    pixels_per_cm: float = 16.0
+    pixels_per_cm: float = 40.0
     image_workspace_points_px: tuple[
         ImagePointPx,
         ImagePointPx,
@@ -114,8 +115,8 @@ class LabEscapeConfig:
     ] = (
         (0.0, 0.0),
         (800.0, 0.0),
-        (800.0, 800.0),
-        (0.0, 800.0),
+        (800.0, 400.0),
+        (0.0, 400.0),
     )
     min_hand_confidence: float = 0.2
 
@@ -164,7 +165,7 @@ class LabEscapeConfig:
 
     @property
     def origin_to_bottom_boundary_cm(self) -> float:
-        return self.boundary_size_cm - self.origin_to_top_boundary_cm
+        return self.boundary_height_cm - self.origin_to_top_boundary_cm
 
     @property
     def z_min_cm(self) -> float:
@@ -180,7 +181,7 @@ class LabEscapeConfig:
 
     @property
     def vision_height_px(self) -> float:
-        return self.boundary_size_cm * self.pixels_per_cm
+        return self.boundary_height_cm * self.pixels_per_cm
 
     @property
     def target_y_min_cm(self) -> float:

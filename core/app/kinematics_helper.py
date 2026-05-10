@@ -91,8 +91,7 @@ class ArmIKConfig:
     # 這裡的 min/max 是「實際送給馬達」的角度，不是 model angle。
     joint_limits: dict[str, JointLimit] = field(
         default_factory=lambda: {
-            "J1": JointLimit(min_deg=-45.0, max_deg=45.0),
-            # 依照目前 visualizer 使用的範圍。
+            "J1": JointLimit(min_deg=0, max_deg=0),
             "J2": JointLimit(min_deg=-30.0, max_deg=90.0),
             "J3": JointLimit(min_deg=-60.0, max_deg=60.0),
             "J4": JointLimit(min_deg=-60.0, max_deg=60.0),

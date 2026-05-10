@@ -62,7 +62,7 @@ class RobotControllerTest(unittest.TestCase):
         self.assertIn("planned_landing_xyz_cm", result_fields)
         self.assertNotIn("targets", result_fields)
 
-    def test_clamp_robot_yz_matches_square_workspace_only(self) -> None:
+    def test_clamp_robot_yz_matches_rectangular_workspace_only(self) -> None:
         """Corners inside the rectangle must not be pulled toward the origin."""
         cfg = LabEscapeConfig()
         ctl = EscapeController(cfg)
@@ -71,10 +71,11 @@ class RobotControllerTest(unittest.TestCase):
         self.assertAlmostEqual(clamped.y_cm, corner.y_cm)
         self.assertAlmostEqual(clamped.z_cm, corner.z_cm)
 
-    def test_lab_escape_workspace_z_and_y_spans_match_boundary_size(self) -> None:
-        """Origin splits each axis so max - min equals the square edge length."""
+    def test_lab_escape_workspace_z_and_y_spans_match_rectangle_size(self) -> None:
+        """Origin can split width and height independently."""
         cfg = LabEscapeConfig(
             boundary_size_cm=25.0,
+            boundary_height_cm=12.0,
             origin_to_left_boundary_cm=10.0,
             origin_to_top_boundary_cm=8.0,
         )
@@ -84,7 +85,7 @@ class RobotControllerTest(unittest.TestCase):
         )
         self.assertAlmostEqual(
             cfg.target_z_max_cm - cfg.target_z_min_cm,
-            cfg.boundary_size_cm,
+            cfg.boundary_height_cm,
         )
         self.assertAlmostEqual(cfg.target_z_min_cm, -cfg.origin_to_bottom_boundary_cm)
 
@@ -105,7 +106,7 @@ class RobotControllerTest(unittest.TestCase):
         controller = RobotController(SimpleNamespace())
         config = controller.escape.config
         self.assertEqual(config.vision_width_px, 800.0)
-        self.assertEqual(config.vision_height_px, 800.0)
+        self.assertEqual(config.vision_height_px, 400.0)
 
         top_left = controller._calibrate_hand_yz(
             Hand(detected=True, x=0.0, y=0.0, confidence=1.0)
@@ -123,10 +124,10 @@ class RobotControllerTest(unittest.TestCase):
         self.assertIsNotNone(bottom_right)
         assert top_left is not None
         assert bottom_right is not None
-        self.assertEqual(top_left.y_cm, -25.0)
-        self.assertEqual(top_left.z_cm, 25.0)
-        self.assertEqual(bottom_right.y_cm, 25.0)
-        self.assertEqual(bottom_right.z_cm, -25.0)
+        self.assertEqual(top_left.y_cm, -10.0)
+        self.assertEqual(top_left.z_cm, 10.0)
+        self.assertEqual(bottom_right.y_cm, 10.0)
+        self.assertEqual(bottom_right.z_cm, 0.0)
 
     def test_escape_controller_and_state_machine_share_one_config(self) -> None:
         config = LabEscapeConfig(
@@ -138,8 +139,8 @@ class RobotControllerTest(unittest.TestCase):
 
         self.assertIs(controller.config, config)
         self.assertIs(controller.machine.config, config)
-        self.assertEqual(config.vision_width_px, 500.0)
-        self.assertEqual(config.target_y_min_cm, -25.0)
+        self.assertEqual(config.vision_width_px, 200.0)
+        self.assertEqual(config.target_y_min_cm, -10.0)
 
     def test_motion_cycles_use_angle_delta_velocity_and_dt(self) -> None:
         self.assertEqual(
