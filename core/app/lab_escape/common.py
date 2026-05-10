@@ -140,10 +140,10 @@ class LabEscapeConfig:
     blind_zone_detection_margin_cm: float = 2.5
 
     # Motion speeds in the lab YZ plane.
-    normal_speed_cm_s: float = 50.0
-    boundary_speed_cm_s: float = 50.0
-    retreat_speed_cm_s: float = 50.0
-    idle_speed_cm_s: float = 30.0
+    normal_speed_cm_s: float = 35.0
+    boundary_speed_cm_s: float = 35.0
+    retreat_speed_cm_s: float = 35.0
+    idle_speed_cm_s: float = 15.0
 
     blind_zone: Rect | None = None
 
