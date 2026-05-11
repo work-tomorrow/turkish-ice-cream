@@ -86,6 +86,7 @@ poetry --version
 ```bash
 poetry env use "$(pyenv which python)"   # bind Poetry’s venv to pyenv’s Python
 poetry install                           # creates .venv + installs packages
+poetry run pip install mediapipe         # only on devices running vision_service
 ```
 
 ---
