@@ -11,7 +11,7 @@ Core API 用的 IK helper。
     y: 左右
     z: 上下
 
-這份檔案是從 ik_visualizer_smooth.py 抽出來的「純計算版本」：
+這份檔案是從早期 visualizer 抽出來的「純計算版本」：
 - 沒有 matplotlib
 - 沒有 Slider
 - 沒有 CSV
@@ -33,7 +33,7 @@ Core API 用的 IK helper。
     J4 = -J1 + extra_yaw
 
 這版已整合 robust IK：
-- L_ROD 預設 30 cm
+- L_ROD 預設 45 cm
 - 目標是半徑 25 cm 圓內盡量穩定解出
 - 如果 J2 撞到硬體限制，即使還在原本 trigger radius 內，也會啟用 extra
 - 使用 multi-start numerical IK，避免某些區域卡在局部解
@@ -79,7 +79,7 @@ class ArmIKConfig:
     # 這是希望穩定可用的 Y-Z 半徑，不是硬限制。
     target_good_radius: float = 25.0
 
-    # extra 啟用範圍，單位：cm
+    # pitch extra 啟用範圍，單位：cm；yaw 不受此 activation 限制。
     extra_trigger_radius: float = 15.0
     extra_full_radius: float = 20.0
 
@@ -757,7 +757,16 @@ class ArmIKHelper:
                     max_extra_pitch,
                     max_extra_yaw,
                 )
-                J[:, i] = (self._end_yz_from_vars(vv) - current) / cfg.numerical_eps
+                delta = cfg.numerical_eps
+                if np.array_equal(vv, v):
+                    # At an upper limit, probe inward so the joint can leave it.
+                    vv = v.copy()
+                    vv[i] -= cfg.numerical_eps
+                    vv = self._clamp_v_to_joint_limits(
+                        vv, max_extra_pitch, max_extra_yaw,
+                    )
+                    delta = -cfg.numerical_eps
+                J[:, i] = (self._end_yz_from_vars(vv) - current) / delta
 
             reg = np.diag(
                 [
@@ -834,7 +843,7 @@ class ArmIKHelper:
             target_z,
             max_extra_pitch,
             max_extra_yaw,
-            initial_v=initial_v if cfg.use_multistart else None,
+            initial_v=initial_v,
         )
 
         best: tuple[float, np.ndarray, dict[str, float], np.ndarray] | None = None
@@ -875,13 +884,13 @@ class ArmIKHelper:
         reached_z = float(rod_end[2])
 
         if activation <= 1e-6:
-            mode = "inside: extra disabled"
+            mode = "inside: pitch extra disabled"
         elif limit_activation > radial_activation + 1e-6:
-            mode = "joint-limit assist: extra enabled"
+            mode = "joint-limit assist: pitch extra enabled"
         elif activation >= 1.0 - 1e-6:
-            mode = "outside: extra fully enabled"
+            mode = "outside: pitch extra fully enabled"
         else:
-            mode = "transition: extra smoothly enabled"
+            mode = "transition: pitch extra smoothly enabled"
 
         return IKResult(
             target_y_cm=target_y,

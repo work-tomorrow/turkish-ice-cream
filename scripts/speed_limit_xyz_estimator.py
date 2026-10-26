@@ -24,9 +24,8 @@ speed_limit_xyz_estimator.py
    再檢查算出的 motor angle delta 是否小於速度限制。
 
 使用方式：
-    把這個檔案放在 kinematics_helper.py 同一層。
-    然後執行：
-        python speed_limit_xyz_estimator.py
+    從專案根目錄執行：
+        poetry run python scripts/speed_limit_xyz_estimator.py
 """
 
 from __future__ import annotations
@@ -38,11 +37,7 @@ from typing import Any
 
 import numpy as np
 
-try:
-    from kinematics_helper import ArmIKHelper
-except ImportError:
-    # 如果你檔名還是我前面給的 robust 版，可以用這個 fallback。
-    from kinematics_helper_robust_lrod30 import ArmIKHelper
+from core.app.kinematics_helper import ArmIKHelper
 
 
 # =========================
