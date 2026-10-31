@@ -4,6 +4,14 @@
 
 A lightweight **Turkish ice cream project** that combines a **FastAPI** core service, library packages for **hand tracking** and **motor / hardware adapters**, and a **Poetry + pyenv** workflow ready for Raspberry Pi or desktop development.
 
+[View MakeNTU presentation slides](./docs/MakeNTU26.pdf)
+
+<p align="center">
+  <img src="./assets/machine.png" alt="Machine" width="60%">
+</p>
+
+![Image 1](./assets/image1.png)
+
 <!-- Optional: add screenshots under `./assets/` and uncomment.
 <img src="./assets/banner.jpg" alt="Demo" width="100%">
 -->
