@@ -10,7 +10,7 @@ A lightweight **Turkish ice cream project** that combines a **FastAPI** core ser
   <img src="./assets/machine.png" alt="Machine" width="60%">
 </p>
 
-![Image 1](./assets/image1.png)
+![Image 1](./assets/image.png)
 
 <!-- Optional: add screenshots under `./assets/` and uncomment.
 <img src="./assets/banner.jpg" alt="Demo" width="100%">
